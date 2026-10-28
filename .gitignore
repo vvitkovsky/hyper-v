@@ -427,4 +427,7 @@ FodyWeavers.xsd
 # Official VS Code C# Dev Kit Extension exclusion
 #*.lscache
 # Generated per-VM state: encrypted guest credentials, config, logs and locks
-/HyperV-NightlyUpdate/.state/
+/VM-NightlyUpdate/.state/
+# Cached DVMS installers and license files
+/VM-DVMS/.cache/
+/VM-DVMS/License*.lic

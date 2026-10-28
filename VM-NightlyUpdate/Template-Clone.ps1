@@ -91,6 +91,89 @@ function Test-GuestComputerName([string]$ComputerName) {
     $ComputerName -match '^(?![0-9]+$)(?!-)[A-Za-z0-9-]{1,15}(?<!-)$'
 }
 
+function Get-TemplateVM([string]$TemplateName) {
+    $found=@(Get-VM | Where-Object Name -EQ $TemplateName)
+    if ($found.Count -eq 0) { throw "Template VM '$TemplateName' was not found. Create and install it with VM-NightlyUpdate first." }
+    if ($found.Count -gt 1) { throw "More than one VM is named '$TemplateName'; rename the extra VM first." }
+    $found[0]
+}
+
+function Get-TemplateGuestCredential {
+    # Needs VM-Registration.ps1, Credential-Input.ps1 and System.Security loaded.
+    param([Parameter(Mandatory=$true)][string]$TemplateName,[Parameter(Mandatory=$true)][string]$BaseDirectory)
+    $registration=Get-VMUpdateRegistration -VMName $TemplateName -BaseDirectory $BaseDirectory
+    $path=Join-Path $registration.Root 'guest-credential.json'
+    if (-not (Test-Path -LiteralPath $path)) { throw "No saved guest credentials for '$TemplateName'. Run Install.cmd for the template." }
+    Read-SavedVMGuestCredential -Path $path
+}
+
+function Read-TemplateCopySettings {
+    # Values left empty are prompted for; Enter accepts each default.
+    param([string]$Name,[string]$Destination,[string]$ComputerName,[switch]$KeepComputerName)
+    if ([string]::IsNullOrWhiteSpace($Name)) {
+        $entered=(Read-Host 'New VM name [Windows 11 Test]').Trim()
+        $Name=if ([string]::IsNullOrWhiteSpace($entered)) { 'Windows 11 Test' } else { $entered }
+    }
+    if ([string]::IsNullOrWhiteSpace($Destination)) {
+        if ($Name.IndexOfAny([IO.Path]::GetInvalidFileNameChars()) -ge 0 -or
+            $Name.EndsWith('.') -or $Name.EndsWith(' ') -or $Name -match '^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)') {
+            throw 'This VM name cannot be used as a folder name. Choose another name or supply -Destination explicitly.'
+        }
+        $default=Join-Path 'A:\VMs' $Name
+        $entered=(Read-Host "Destination [$default]").Trim()
+        $Destination=if ([string]::IsNullOrWhiteSpace($entered)) { $default } else { $entered }
+    }
+    if (-not $KeepComputerName) {
+        if ([string]::IsNullOrWhiteSpace($ComputerName)) {
+            $default=ConvertTo-GuestComputerName $Name
+            $entered=(Read-Host "Windows computer name [$default]").Trim()
+            $ComputerName=if ([string]::IsNullOrWhiteSpace($entered)) { $default } else { $entered }
+        }
+        if (-not (Test-GuestComputerName $ComputerName)) { throw "'$ComputerName' is not a valid Windows computer name: use up to 15 letters, digits and hyphens." }
+    }
+    [pscustomobject]@{Name=$Name;Destination=$Destination;ComputerName=$(if ($KeepComputerName) { $null } else { $ComputerName })}
+}
+
+function Invoke-VMGuestCommand {
+    param(
+        [Parameter(Mandatory=$true)][guid]$VMId,
+        [Parameter(Mandatory=$true)][Management.Automation.PSCredential]$Credential,
+        [Parameter(Mandatory=$true)][scriptblock]$Script,
+        [object[]]$Arguments=@(),
+        [int]$TimeoutSeconds=60
+    )
+    # PowerShell Direct can stall during boot; bound every call.
+    $job=Invoke-Command -VMId $VMId -Credential $Credential -ScriptBlock $Script -ArgumentList $Arguments -AsJob
+    try {
+        if (-not (Wait-Job -Job $job -Timeout $TimeoutSeconds)) { throw "Guest command timed out after $TimeoutSeconds seconds." }
+        Receive-Job -Job $job -ErrorAction Stop
+        if ($job.State -ne 'Completed') { throw "Guest command ended in state $($job.State)." }
+    } finally { Remove-Job -Job $job -Force -ErrorAction SilentlyContinue }
+}
+
+function Wait-VMGuest {
+    # Returns the guest's computer name and boot time once it differs from PreviousBoot.
+    param(
+        [Parameter(Mandatory=$true)][guid]$VMId,
+        [Parameter(Mandatory=$true)][Management.Automation.PSCredential]$Credential,
+        [string]$PreviousBoot='',
+        [Parameter(Mandatory=$true)][datetime]$Deadline
+    )
+    $lastFailure=''
+    do {
+        try {
+            $guest=Invoke-VMGuestCommand -VMId $VMId -Credential $Credential -Script {
+                [pscustomobject]@{Name=$env:COMPUTERNAME;Boot=(Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().ToString('o')}
+            }
+            if ($guest -and $guest.Boot -ne $PreviousBoot) { return $guest }
+        } catch {
+            if ($_.Exception.Message -ne $lastFailure) { $lastFailure=$_.Exception.Message; Write-Verbose "Guest not ready: $lastFailure" }
+        }
+        Start-Sleep -Seconds 10
+    } while ((Get-Date) -lt $Deadline)
+    throw "Windows did not become reachable through PowerShell Direct by $($Deadline.ToString('HH:mm:ss'))."
+}
+
 function Set-VMCopyComputerName {
     [CmdletBinding()]
     param(
@@ -104,28 +187,10 @@ function Set-VMCopyComputerName {
     if (-not (Test-GuestComputerName $ComputerName)) { throw "'$ComputerName' is not a valid Windows computer name: use up to 15 letters, digits and hyphens." }
     $deadline=(Get-Date).AddMinutes($TimeoutMinutes)
     function Invoke-CopyGuest([Management.Automation.PSCredential]$Login,[scriptblock]$Script,[object[]]$Arguments=@()) {
-        # PowerShell Direct can stall during boot; bound every call.
-        $job=Invoke-Command -VMId $VMId -Credential $Login -ScriptBlock $Script -ArgumentList $Arguments -AsJob
-        try {
-            if (-not (Wait-Job -Job $job -Timeout 60)) { throw 'Guest command timed out after 60 seconds.' }
-            Receive-Job -Job $job -ErrorAction Stop
-            if ($job.State -ne 'Completed') { throw "Guest command ended in state $($job.State)." }
-        } finally { Remove-Job -Job $job -Force -ErrorAction SilentlyContinue }
+        Invoke-VMGuestCommand -VMId $VMId -Credential $Login -Script $Script -Arguments $Arguments
     }
     function Wait-CopyGuest([Management.Automation.PSCredential]$Login,[string]$PreviousBoot='') {
-        $lastFailure=''
-        do {
-            try {
-                $guest=Invoke-CopyGuest $Login {
-                    [pscustomobject]@{Name=$env:COMPUTERNAME;Boot=(Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().ToString('o')}
-                }
-                if ($guest -and $guest.Boot -ne $PreviousBoot) { return $guest }
-            } catch {
-                if ($_.Exception.Message -ne $lastFailure) { $lastFailure=$_.Exception.Message; Write-Verbose "Guest not ready: $lastFailure" }
-            }
-            Start-Sleep -Seconds 10
-        } while ((Get-Date) -lt $deadline)
-        throw "Windows did not become reachable through PowerShell Direct within $TimeoutMinutes minutes."
+        Wait-VMGuest -VMId $VMId -Credential $Login -PreviousBoot $PreviousBoot -Deadline $deadline
     }
     $vm=Get-VM -Id $VMId
     if ($vm.State -ne 'Off') { throw 'The copied VM must be off before its computer name is changed.' }

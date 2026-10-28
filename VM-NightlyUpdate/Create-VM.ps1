@@ -33,35 +33,12 @@ try {
     . (Join-Path $PSScriptRoot 'VM-Registration.ps1')
     . (Join-Path $PSScriptRoot 'Template-Clone.ps1')
     if ($KeepComputerName -and $PSBoundParameters.ContainsKey('ComputerName')) { throw 'Use -ComputerName OR -KeepComputerName.' }
-    if (-not $PSBoundParameters.ContainsKey('Name')) {
-        $enteredName=(Read-Host 'New VM name [Windows 11 Test]').Trim()
-        $Name=if ([string]::IsNullOrWhiteSpace($enteredName)) { 'Windows 11 Test' } else { $enteredName }
-    }
-    if (-not $PSBoundParameters.ContainsKey('Destination')) {
-        if ([string]::IsNullOrWhiteSpace($Name) -or $Name.IndexOfAny([IO.Path]::GetInvalidFileNameChars()) -ge 0 -or
-            $Name.EndsWith('.') -or $Name.EndsWith(' ') -or $Name -match '^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)') {
-            throw 'This VM name cannot be used as a folder name. Choose another name or supply -Destination explicitly.'
-        }
-        $defaultDestination=Join-Path 'A:\VMs' $Name
-        $enteredDestination=(Read-Host "Destination [$defaultDestination]").Trim()
-        $Destination=if ([string]::IsNullOrWhiteSpace($enteredDestination)) { $defaultDestination } else { $enteredDestination }
-    }
+    $null=Get-TemplateVM $TemplateName
+    $settings=Read-TemplateCopySettings -Name $Name -Destination $Destination -ComputerName $ComputerName -KeepComputerName:$KeepComputerName
+    $Name=$settings.Name; $Destination=$settings.Destination; $ComputerName=$settings.ComputerName
     $credential=$null
-    if (-not $KeepComputerName) {
-        if (-not $PSBoundParameters.ContainsKey('ComputerName')) {
-            $defaultComputerName=ConvertTo-GuestComputerName $Name
-            $enteredComputerName=(Read-Host "Windows computer name [$defaultComputerName]").Trim()
-            $ComputerName=if ([string]::IsNullOrWhiteSpace($enteredComputerName)) { $defaultComputerName } else { $enteredComputerName }
-        }
-        if (-not (Test-GuestComputerName $ComputerName)) { throw "'$ComputerName' is not a valid Windows computer name: use up to 15 letters, digits and hyphens." }
-        # Renaming signs in to the copy with the template's saved maintenance credential.
-        $registration=Get-VMUpdateRegistration -VMName $TemplateName -BaseDirectory $PSScriptRoot
-        $credentialPath=Join-Path $registration.Root 'guest-credential.json'
-        if (-not (Test-Path -LiteralPath $credentialPath)) {
-            throw "No saved guest credentials for '$TemplateName'. Run Install.cmd for the template, or use -KeepComputerName."
-        }
-        $credential=Read-SavedVMGuestCredential -Path $credentialPath
-    }
+    # Renaming signs in to the copy with the template's saved maintenance credential.
+    if (-not $KeepComputerName) { $credential=Get-TemplateGuestCredential -TemplateName $TemplateName -BaseDirectory $PSScriptRoot }
     Write-Host "New VM: $Name"
     if ($credential) { Write-Host "Windows computer name: $ComputerName" }
     Write-Host "Preparing VM, destination: $Destination, please wait..."
