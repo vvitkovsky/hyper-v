@@ -1,0 +1,180 @@
+Dedicated template VM and on-demand copying - 2026-10-27.
+
+- Removed nightly export and ExportPath. Maintenance finishes after shutdown
+  and checkpoint refresh. New default VM name: Windows 11 Template.
+- Added Create-VM.cmd/Create-VM.ps1 and Template-Clone.ps1. Copies use a new
+  VM identity, preserve checkpoints, share the template's maintenance lock,
+  reject existing destinations/names, and validate independent disk chains.
+- 67 nightly workflow checks and 14 clone scenarios passed under Windows
+  PowerShell 5.1. Clone coverage includes maintenance contention, running source,
+  missing clean, duplicate name, existing/nested/relative destinations,
+  incompatibilities, import failure, identity collision, checkpoint loss,
+  invalid disks and a parent disk outside the destination.
+- Initial live migration booted Windows 11 Template successfully: 26H2,
+  build 26300.9711, saved administrator credentials verified, no pending reboot.
+  The new VM was shut down and clean was created. Its first checkpoint query
+  did not verify; a fresh VM query confirmed the checkpoint. Nightly creation
+  now retrieves the VM and identifies the new checkpoint by its unique name.
+- Live copy passed at 15:14 Europe/Helsinki: direct import of the registered,
+  stopped template created an independent VM and preserved clean. All current
+  and checkpoint disk chains validated inside the new destination. The temporary
+  test VM and its files were removed afterward.
+- The real compatibility check creates destination directories. The clone
+  script now reserves its new folder before Compare-VM; the test reproduces
+  that behavior. All 14 clone scenarios passed after this correction.
+- Template is registered at A:\HyperV Template and left Off with clean.
+  AutomaticStartAction is Nothing. The old GUID/current/Windows 11 export
+  directory was removed after checking all registered disk chains.
+- Midnight maintenance now targets Windows 11 Template. The previous working-VM
+  task was removed; working VMs were not changed. Next run: October 28, 00:00.
+- Installed runner CheckOnly passed at 15:15. The full Windows Update/DISM
+  maintenance cycle was not repeated during migration.
+
+Historical results for earlier revisions follow; exports described below are
+no longer part of the current nightly workflow.
+Whole-VM template with checkpoints - 2026-10-27.
+
+- The final step now uses Export-VM after shutdown and checkpoint refresh.
+  The imported template retains clean (or the configured checkpoint name),
+  together with any other source checkpoints.
+- Requires the selected VM to remain off and the refreshed checkpoint to exist.
+- Export validation distinguishes the main Virtual Machines configuration from
+  Snapshots configurations, requires the refreshed checkpoint's ID, and checks
+  base and differencing disks before and after template promotion.
+- Manifest records ExportKind=VirtualMachineWithCheckpoints and the main VM
+  configuration path. Existing v1 snapshot-only exports can be replaced safely.
+- 23 export scenarios passed under Windows PowerShell 5.1, including absent,
+  incorrect and empty checkpoint files, incorrect VM configuration, extra and
+  custom checkpoints, running VM and removed checkpoint, plus previous failure,
+  rollback, timeout and directory safety scenarios.
+- 69 host workflow checks passed under Windows PowerShell 5.1.
+- Hyper-V operations are mocked in these tests; no live export/import or VM
+  changes were performed for this revision. The next successful nightly run
+  produces the new template. Existing imported VMs are unaffected.
+
+Historical evidence from previous revisions follows (not rerun unless above).
+Checkpoint template export and initialized commit fix - 2026-10-26.
+
+Template export revision:
+- Added final Export-VMSnapshot step after successful checkpoint refresh to
+  A:\HyperV Template\<VM ID>\current, with separate staging and disk validation.
+- 69 host workflow checks passed, including success ordering and export failure
+  retaining the refreshed checkpoint while reporting a failed maintenance run.
+- 15 export tests passed using actual temporary filesystem directories with
+  mocked Hyper-V jobs/disks: first export, replacement, job/command failure,
+  timeout cancellation, missing configuration, invalid disk, promotion failure,
+  old-directory rename failure, disk failure after relocation, unrecognized or
+  other-VM current folders, old-export cleanup failure, junction rejection and
+  relative-path rejection. Unrelated files and previous templates are preserved.
+- Live export/import has not been run for this revision; the first export is
+  performed after the next successful nightly checkpoint refresh. No VM state
+  or checkpoints were changed while adding this step.
+- The active scheduled task was verified to use this updated source folder.
+  A: is a local NTFS fixed drive; a temporary SYSTEM task successfully created
+  and removed a test file/directory in A:\HyperV Template, then was unregistered.
+
+October 26 diagnosis and regression checks:
+- The guest still ran 25H2 with 26H2 staged, RebootRequired=True and a Started
+  commit marker. The worker had failed with 0x80240004 (WU_E_NOT_INITIALIZED).
+- Fixed Request-Reboot to reuse the installer's update collection, or recover
+  pending update objects from a local scan when resuming in a new worker.
+  No empty installer is committed for a CBS/DISM-only pending restart.
+- Hardened the COM simulation to reject Commit without Updates. Running these
+  tests against the previous delivered worker reproduces the initialization
+  failure. The earlier mock failed to enforce this API precondition.
+- Added phase-specific errors, known initialization-rejection recovery, and
+  clearer host logging of install operations awaiting restart/final scan.
+- Reran 67 host workflow checks and 29 guest worker scenarios under Windows
+  PowerShell 5.1. All passed; all 7 delivered scripts parsed successfully.
+- Live recovery succeeded at 15:56 Europe/Helsinki on October 26: the corrected
+  guest worker committed the existing staged update using its recovered update
+  collection. After a graceful restart the guest reported 26H2, build 26300.9711,
+  RebootRequired=False, and a successful local scan with no remaining offers.
+  Corrected host/guest scripts were installed in the existing D: source folder.
+  VM left running; checkpoint names/IDs verified unchanged. The exact legacy
+  initialization rejection was migrated once after validating its run ID,
+  failure status and boot marker; uncertain commit markers are not cleared.
+
+Live diagnosis in D:\Research\Hyper-V\HyperV-NightlyUpdate:
+- October 22 midnight run failed before guest start: allocation of 4096 MB
+  failed with 0x800705AA. October 21 completed but installed only Defender.
+- Guest is on 25H2. Original cached scan returned zero updates; explicitly
+  querying OptionalInstallation found Windows 11, version 26H2, BrowseOnly=False.
+- Corrected combined ONLINE scan succeeded and found both Defender and 26H2.
+  Commit(uint) method availability was verified in the guest (not invoked).
+- Added one commit per guest boot before a required reboot, with persistent
+  intent to prevent repeat calls after ambiguous failures.
+- Added six bounded startup attempts for 0x800705AA only, five minutes apart.
+
+Selection now includes offered feature upgrades, drivers and optional updates.
+Hidden/installed updates remain excluded. Quiet installation is requested and
+post-update reboots allow 60 minutes within the existing overall deadline.
+
+Fixed: terminal worker failures swallowed by polling; duplicate clean names on
+checkpoint rollback; installation/migration bypassing manual-run locks.
+Added download/install test coverage and consistent status publication with
+lock release independent of logging failures. Source permissions are unchanged
+at the user's request for testing.
+
+Current checks (Windows PowerShell 5.1):
+- All 8 delivered PowerShell scripts passed syntax checks.
+- 69 host workflow/regression checks passed, including resource recovery,
+  retry exhaustion, immediate failure for unrelated startup errors, worker startup failure,
+  stale Running records, missing status, nonzero task exit, queued task,
+  transport retry, completion race, promotion verification failure, rollback
+  rename/query failure, and lock release after a status-write failure.
+  Checkpoint workflows run with both legacy state (default clean) and a custom
+  name containing spaces, brackets, apostrophes and punctuation. Unrelated
+  checkpoints, including clean when a custom name is selected, are preserved.
+  Empty persisted checkpoint names are rejected before VM operations.
+  A simulated 20-minute feature-upgrade reboot succeeds for default and custom
+  checkpoint configurations.
+- 20 installer/uninstaller scenario groups passed, including refusal to change
+  config, credentials, or tasks while a manual run holds the file lock, and
+  refusal to migrate a locked previous-version installation.
+  Custom checkpoint persistence, selected-name duplicate detection, and empty/
+  whitespace checkpoint rejection passed.
+- 29 guest worker scenarios passed. Cases execute the actual worker's
+  download/install branches with simulated COM dependencies: two-update success,
+  partial/failed download, missing download, busy installer, overall/per-update
+  install failure, partial installation result, and reboot between updates.
+  Feature-upgrade, driver-only, and optional-only update sets are installed.
+  Quiet-capable interactive updates succeed; unsupported quiet installs report
+  failure. The search assertion protects the broadened scope and hidden filter.
+  Commit checks cover pending/installation/cleanup reboots, commit failure,
+  avoiding repeated calls within a boot, uncertain prior outcome, and a new boot.
+  They now enforce nonempty commit collections and reuse of the original
+  installer, and cover pending-scan failure, CBS-only restarts, initialization
+  rejection and a retry after that specific rejection.
+- Credential roundtrip, invalid-input, saved-fallback and prompt checks passed.
+- Elevation argument-preservation check passed.
+- Install.cmd passes VM name/time/checkpoint directly as named PowerShell parameters.
+  Native CMD-to-PowerShell checks passed for default and edited settings,
+  including spaces/punctuation in VM/checkpoint names and forwarding -NoPause.
+  Installer tests confirm obsolete environment variables no longer affect
+  defaults or explicit parameters. Installer/elevation suites were rerun.
+- Native two-process mutex checks passed for contention, different-VM
+  independence, normal release and abandoned-owner recovery. These also passed
+  with a PowerShell 7 parent and Windows PowerShell 5.1 child.
+- Four discrimination checks passed: restoring the old polling or checkpoint
+  rollback, or removing installer file locks, makes the corresponding regression test fail.
+  Disabling guest download/install now fails the guest tests.
+
+Limits: COM/WUA, Hyper-V and task operations are mocked in the workflow tests.
+Live checks for this revision completed the staged 26H2 update and verified
+the resulting version after reboot. This recovery did not run DISM cleanup,
+perform the final online maintenance scan, shut down, or refresh a checkpoint.
+Those remain part of the scheduled maintenance workflow. Installer/credential/
+mutex checks above were retained from October 20; guest/host tests were rerun.
+It does not claim exhaustive failure or mutation coverage.
+
+Earlier evidence (not repeated for this revision):
+- Source-folder native SYSTEM -CheckOnly succeeded at 11:00 Europe/Helsinki;
+  real VM stayed Off and the temporary task was removed.
+- An earlier version completed a live update, DISM cleanup, guest shutdown,
+  and clean checkpoint refresh at 10:16:52 Europe/Helsinki, task result 0.
+
+Run Install.cmd from the permanent folder to apply this version.
+Retain .state and your Install.cmd VM/time/checkpoint settings. Existing encrypted guest
+credentials can be reused. The ZIP contains source/documentation only, with no
+generated state, credentials, or logs.
