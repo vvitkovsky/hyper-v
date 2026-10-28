@@ -1,11 +1,18 @@
 #Requires -Version 5.1
-# Build share layout: <BuildRoot>\<version>\<version>_DVMS[_<brand>]_x64_<Full|Limited>.exe
-$script:DVMSInstallerFilter='*_DVMS_*x64_*.exe'
+# Build share layout, <BuildRoot>\<version>\ holding either or both of:
+#   <version>_DVMS[_<brand>]_x64_<Full|Limited>.exe
+#   Mirasys-VMS-<Complete|Update>-<version>.exe   (release builds; Complete = Full, Update = Limited)
+$script:DVMSInstallerFilters=@('*_DVMS_*x64_*.exe','Mirasys-VMS-*.exe')
+
+function Get-DVMSInstallerFiles([string]$Folder,[switch]$IgnoreErrors) {
+    $action=if ($IgnoreErrors) { 'SilentlyContinue' } else { 'Stop' }
+    @(foreach ($filter in $script:DVMSInstallerFilters) { Get-ChildItem -LiteralPath $Folder -Filter $filter -File -ErrorAction $action })
+}
 
 function Get-DVMSBuildVersions([string]$BuildRoot) {
     if (-not (Test-Path -LiteralPath $BuildRoot)) { throw "Build share is not reachable: $BuildRoot" }
     foreach ($folder in Get-ChildItem -LiteralPath $BuildRoot -Directory -ErrorAction Stop) {
-        $installers=@(Get-ChildItem -LiteralPath $folder.FullName -Filter $script:DVMSInstallerFilter -File -ErrorAction SilentlyContinue)
+        $installers=Get-DVMSInstallerFiles $folder.FullName -IgnoreErrors
         if ($installers.Count) {
             [pscustomobject]@{Version=$folder.Name;Updated=($installers | Measure-Object LastWriteTime -Maximum).Maximum}
         }
@@ -13,11 +20,11 @@ function Get-DVMSBuildVersions([string]$BuildRoot) {
 }
 
 function Get-DVMSInstallers([string]$BuildRoot,[string]$Version) {
-    # Plain (unbranded) installers first, Full before Limited.
+    # Unbranded installers first, then full (Full/Complete) before limited (Limited/Update).
     $folder=Join-Path $BuildRoot $Version
     if (-not (Test-Path -LiteralPath $folder -PathType Container)) { throw "Version folder not found: $folder" }
-    @(Get-ChildItem -LiteralPath $folder -Filter $script:DVMSInstallerFilter -File -ErrorAction Stop) |
-        Sort-Object @{Expression={$_.Name -notmatch '_DVMS_x64_'}},@{Expression={$_.Name -notmatch '_Full\.exe$'}},Name
+    Get-DVMSInstallerFiles $folder | Sort-Object FullName -Unique |
+        Sort-Object @{Expression={$_.Name -notmatch '(_DVMS_x64_|^Mirasys-VMS-)'}},@{Expression={$_.Name -notmatch '(_Full\.exe$|^Mirasys-VMS-Complete-)'}},Name
 }
 
 function Save-DVMSInstaller {

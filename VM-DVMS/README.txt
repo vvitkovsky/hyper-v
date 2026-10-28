@@ -14,8 +14,12 @@ All questions come first, so the slow steps then run unattended:
 Press Enter to accept each default.
 
 Versions are folders under \\rdfileserver\builds\DVMS that contain installers
-named <version>_DVMS[_<brand>]_x64_<Full|Limited>.exe. Unbranded installers are
-listed first, Full before Limited, so 1 is normally <version>_DVMS_x64_Full.exe.
+named either way:
+  <version>_DVMS[_<brand>]_x64_<Full|Limited>.exe
+  Mirasys-VMS-<Complete|Update>-<version>.exe   (release builds)
+Unbranded installers are listed first, full (Full, Complete) before limited
+(Limited, Update). So 1 is normally <version>_DVMS_x64_Full.exe, or
+Mirasys-VMS-Complete-<version>.exe when a release has no unbranded _DVMS_ build.
 
 WHAT IT DOES
 1. Checks that the template VM exists and has saved guest credentials (from
