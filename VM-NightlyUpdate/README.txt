@@ -231,6 +231,11 @@ MAINTENANCE BEHAVIOR
   Temporary status-read failures are retried; an idle worker with no current
   status has a two-minute startup allowance. Incomplete completion records are
   checked twice to allow a status/task-state read race.
+- Windows can restart itself during a pass (servicing often needs a second
+  restart after a cumulative update, which terminates the worker). After any
+  failed pass, wait up to 3 minutes for a new boot time, or up to 60 minutes
+  once the guest is unreachable. If Windows restarted, repeat the pass; this
+  counts against the 6-reboot limit. Otherwise the failure stands.
 - After updates and reboots, run supported Windows component cleanup:
   DISM.exe /Online /Cleanup-Image /StartComponentCleanup /ResetBase /NoRestart
   Existing updates cannot be uninstalled afterward. Future updates still work.
@@ -247,8 +252,12 @@ MAINTENANCE BEHAVIOR
   Rollback vacates the replacement's target name and confirms its identity before
   restoring the previous name. If rollback cannot be confirmed, both checkpoints
   are retained under their current names for inspection.
-- Failed/stalled updates leave the VM available for inspection. No automatic
-  checkpoint restoration is performed.
+- After a failure, a VM this run started is shut down with shutdown /s /t 0
+  inside Windows, because later runs skip a VM that is not Off. It is left
+  running if the guest worker is still running, the guest is unreachable, or
+  Windows does not turn off within 15 minutes. Logs stay on the host and in the
+  guest's ProgramData\HyperVNightlyUpdate. No automatic checkpoint restoration
+  is performed.
 - Finish after refreshing the checkpoint. No nightly export is created.
 - Request waking the host from sleep. Wake timers and firmware/power support
   must work. Keep the host on AC power. A powered-off host cannot be started.

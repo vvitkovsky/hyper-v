@@ -1,3 +1,19 @@
+Windows self-restart during a pass, shutdown after failure - 2026-10-29.
+
+- October 29 midnight run failed in Update pass 2. After the KB5127936 restart,
+  TrustedInstaller started a second planned restart at 00:12:17; the worker's
+  scan failed with 0x8024001E and its task ended with 267014 (terminated). The
+  host reported a worker failure and, by design then, left the VM running, so
+  the following night's run would have skipped it.
+- A failed pass now waits for a new guest boot time and repeats the pass when
+  Windows restarted (counted against the 6-reboot limit). After a failure, a
+  VM the run started is shut down cleanly inside Windows unless the worker is
+  still running or the guest is unreachable.
+- Mocked Hyper-V/guest runs under Windows PowerShell 5.1: normal run; worker
+  terminated by a self-restart, then repeated pass and checkpoint refresh;
+  failure without restart, then clean shutdown and VM Off; worker still running
+  at the deadline, VM left running. All behaved as expected.
+
 Dedicated template VM and on-demand copying - 2026-10-27.
 
 - Removed nightly export and ExportPath. Maintenance finishes after shutdown

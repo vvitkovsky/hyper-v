@@ -42,6 +42,7 @@ $lock = $null
 $vmMutex = $null
 $exitCode = 1
 $vm = $null
+$startedVM = $false
 function Save-Outcome([string]$Path) {
     $temporary = "$Path.$([guid]::NewGuid().ToString('N')).tmp"
     try {
@@ -92,6 +93,49 @@ function Wait-Guest([string]$PreviousBoot='', [int]$TimeoutMinutes=15) {
     } while ((Get-Date) -lt $until -and (Get-Date) -lt $deadline)
     throw 'Windows did not become reachable with administrator credentials within the boot timeout.'
 }
+function Wait-GuestRestart([string]$PreviousBoot) {
+    # Returns the new boot time if Windows restarted, or $null if it kept
+    # running. An unreachable guest is treated as a restart in progress.
+    Write-Log 'Update pass failed; checking whether Windows restarted.'
+    $until = (Get-Date).AddMinutes(3)
+    $extended = $false
+    do {
+        try {
+            $current = Invoke-Guest -Timeout 30 -Script {
+                (Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().ToString('o')
+            }
+            if ($current -and $current -ne $PreviousBoot) { return [string]$current }
+        } catch {
+            # Boots that apply updates can take much longer.
+            if (-not $extended) { $until = (Get-Date).AddMinutes(60); $extended = $true }
+        }
+        Start-Sleep -Seconds 15
+    } while ((Get-Date) -lt $until -and (Get-Date) -lt $deadline)
+    $null
+}
+function Stop-GuestAfterFailure {
+    # A running VM is skipped by later runs, so ask Windows to shut down and
+    # let the next night retry. Never force power off or stop a live worker.
+    try {
+        if ((Get-VM -Id $vm.Id).State -ne 'Running') { return }
+        $workerState = Invoke-Guest -Timeout 30 -Script {
+            $task = Get-ScheduledTask -TaskName 'HyperVNightlyUpdate-Worker' -ErrorAction SilentlyContinue
+            if ($task) { [string]$task.State } else { 'None' }
+        }
+        if ($workerState -in @('Running','Queued')) { Write-Log 'Guest update worker is still running; VM left running.'; return }
+        Write-Log 'Requesting clean guest shutdown so the next nightly run can retry.'
+        try {
+            Invoke-Guest -Script {
+                & "$env:SystemRoot\System32\shutdown.exe" /s /t 0
+                if ($LASTEXITCODE -ne 0) { throw "Shutdown request failed: $LASTEXITCODE" }
+            } | Out-Null
+        } catch { Write-Log 'Shutdown command disconnected or failed; waiting for Windows to turn off.' }
+        $until = (Get-Date).AddMinutes(15)
+        while ((Get-VM -Id $vm.Id).State -ne 'Off' -and (Get-Date) -lt $until) { Start-Sleep -Seconds 5 }
+        if ((Get-VM -Id $vm.Id).State -eq 'Off') { Write-Log 'VM is off.' }
+        else { Write-Log 'Windows did not shut down within 15 minutes; VM left running.' }
+    } catch { Write-Log "VM left running: $($_.Exception.Message)" }
+}
 try {
     $vmMutex = Enter-VMUpdateMutex -VMId ([guid]$config.VMId)
     $lock = [IO.File]::Open((Join-Path $Root 'run.lock'), 'OpenOrCreate', 'ReadWrite', 'None')
@@ -123,7 +167,7 @@ try {
         else { $credential = Read-SavedVMGuestCredential -Path (Join-Path $Root 'guest-credential.json') }
         Write-Log "Starting $($vm.Name)."
         for ($attempt=1; $attempt -le 6; $attempt++) {
-            try { Start-VM -VM $vm | Out-Null; break }
+            try { Start-VM -VM $vm | Out-Null; $startedVM = $true; break }
             catch {
                 # Retry only the observed Hyper-V resource-allocation failure.
                 # Never reduce guest RAM or stop other VMs/applications.
@@ -146,95 +190,109 @@ try {
             $passMode = $mode
             $mode = 'Update'
             Write-Log "Starting $passMode pass $pass."
-            Invoke-Guest -Arguments @($worker,$runId,$passMode) -Script {
-                param($WorkerText,$RunId,$Mode)
-                $ErrorActionPreference = 'Stop'
-                $taskName = 'HyperVNightlyUpdate-Worker'
-                $existing = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-                if ($existing -and $existing.State -eq 'Running') { throw 'A previous guest worker is still running.' }
-                $folder = Join-Path $env:ProgramData 'HyperVNightlyUpdate'
-                if (Test-Path -LiteralPath $folder) {
-                    if ((Get-Item -LiteralPath $folder).Attributes -band [IO.FileAttributes]::ReparsePoint) {
-                        throw 'Guest working directory is a reparse point.'
+            try {
+                Invoke-Guest -Arguments @($worker,$runId,$passMode) -Script {
+                    param($WorkerText,$RunId,$Mode)
+                    $ErrorActionPreference = 'Stop'
+                    $taskName = 'HyperVNightlyUpdate-Worker'
+                    $existing = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+                    if ($existing -and $existing.State -eq 'Running') { throw 'A previous guest worker is still running.' }
+                    $folder = Join-Path $env:ProgramData 'HyperVNightlyUpdate'
+                    if (Test-Path -LiteralPath $folder) {
+                        if ((Get-Item -LiteralPath $folder).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                            throw 'Guest working directory is a reparse point.'
+                        }
                     }
-                }
-                New-Item -ItemType Directory -Path $folder -Force | Out-Null
-                $acl = New-Object Security.AccessControl.DirectorySecurity
-                $acl.SetAccessRuleProtection($true,$false)
-                foreach ($sidText in @('S-1-5-18','S-1-5-32-544')) {
-                    $sid = [Security.Principal.SecurityIdentifier]::new($sidText)
-                    $rule = [Security.AccessControl.FileSystemAccessRule]::new($sid,'FullControl','ContainerInherit, ObjectInherit','None','Allow')
-                    $acl.AddAccessRule($rule)
-                }
-                Set-Acl -LiteralPath $folder -AclObject $acl
-                $path = Join-Path $folder 'Guest-Update.ps1'
-                [IO.File]::WriteAllText($path,$WorkerText,[Text.Encoding]::UTF8)
-                $action = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$path`" -RunId $RunId -Mode $Mode"
-                $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
-                $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Hours 5) -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
-                Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal -Settings $settings -Force | Out-Null
-                Start-ScheduledTask -TaskName $taskName
-            } | Out-Null
-            $status = $null
-            $lastWorkerMessage = ''
-            $lastPollFailure = ''
-            $workerStartDeadline = (Get-Date).AddMinutes(2)
-            $incompleteObservations = 0
-            do {
-                Start-Sleep -Seconds 15
-                try {
-                    $probe = Invoke-Guest -Arguments @($runId) -Timeout 30 -Script {
-                        param($ExpectedRun)
-                        $path = Join-Path $env:ProgramData 'HyperVNightlyUpdate\status.json'
-                        $record = $null
-                        if (Test-Path -LiteralPath $path) { $record = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json }
-                        $task = Get-ScheduledTask -TaskName 'HyperVNightlyUpdate-Worker'
-                        $info = Get-ScheduledTaskInfo -TaskName 'HyperVNightlyUpdate-Worker'
-                        [pscustomobject]@{ TaskState=[string]$task.State; Result=$info.LastTaskResult;
-                            Record=$(if ($record -and $record.RunId -eq $ExpectedRun) { $record } else { $null }) }
+                    New-Item -ItemType Directory -Path $folder -Force | Out-Null
+                    $acl = New-Object Security.AccessControl.DirectorySecurity
+                    $acl.SetAccessRuleProtection($true,$false)
+                    foreach ($sidText in @('S-1-5-18','S-1-5-32-544')) {
+                        $sid = [Security.Principal.SecurityIdentifier]::new($sidText)
+                        $rule = [Security.AccessControl.FileSystemAccessRule]::new($sid,'FullControl','ContainerInherit, ObjectInherit','None','Allow')
+                        $acl.AddAccessRule($rule)
                     }
-                } catch {
-                    # Only transport/status-read failures are retryable here.
-                    if ($_.Exception.Message -ne $lastPollFailure) {
-                        $lastPollFailure = $_.Exception.Message
-                        Write-Log "Cannot read guest worker status yet: $lastPollFailure"
+                    Set-Acl -LiteralPath $folder -AclObject $acl
+                    $path = Join-Path $folder 'Guest-Update.ps1'
+                    [IO.File]::WriteAllText($path,$WorkerText,[Text.Encoding]::UTF8)
+                    $action = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$path`" -RunId $RunId -Mode $Mode"
+                    $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+                    $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Hours 5) -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+                    Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal -Settings $settings -Force | Out-Null
+                    Start-ScheduledTask -TaskName $taskName
+                } | Out-Null
+                $status = $null
+                $lastWorkerMessage = ''
+                $lastPollFailure = ''
+                $workerStartDeadline = (Get-Date).AddMinutes(2)
+                $incompleteObservations = 0
+                do {
+                    Start-Sleep -Seconds 15
+                    try {
+                        $probe = Invoke-Guest -Arguments @($runId) -Timeout 30 -Script {
+                            param($ExpectedRun)
+                            $path = Join-Path $env:ProgramData 'HyperVNightlyUpdate\status.json'
+                            $record = $null
+                            if (Test-Path -LiteralPath $path) { $record = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json }
+                            $task = Get-ScheduledTask -TaskName 'HyperVNightlyUpdate-Worker'
+                            $info = Get-ScheduledTaskInfo -TaskName 'HyperVNightlyUpdate-Worker'
+                            [pscustomobject]@{ TaskState=[string]$task.State; Result=$info.LastTaskResult;
+                                Record=$(if ($record -and $record.RunId -eq $ExpectedRun) { $record } else { $null }) }
+                        }
+                    } catch {
+                        # Only transport/status-read failures are retryable here.
+                        if ($_.Exception.Message -ne $lastPollFailure) {
+                            $lastPollFailure = $_.Exception.Message
+                            Write-Log "Cannot read guest worker status yet: $lastPollFailure"
+                        }
+                        continue
                     }
-                    continue
-                }
-                if ($probe.Record -and $probe.Record.Message -ne $lastWorkerMessage) {
-                    Write-Log $probe.Record.Message
-                    $lastWorkerMessage = $probe.Record.Message
-                }
-                if ($probe.TaskState -in @('Running','Queued')) {
-                    $incompleteObservations = 0
-                    continue
-                }
-                if ($probe.TaskState -ne 'Ready') { throw "Guest worker is $($probe.TaskState). Task result: $($probe.Result)" }
-                if ($probe.Record -and $probe.Record.State -ne 'Running') {
-                    if ($probe.Record.State -ne 'Failed' -and $probe.Result -ne 0) {
-                        throw "Guest worker exited unsuccessfully. Task result: $($probe.Result)"
+                    if ($probe.Record -and $probe.Record.Message -ne $lastWorkerMessage) {
+                        Write-Log $probe.Record.Message
+                        $lastWorkerMessage = $probe.Record.Message
                     }
-                    $status = $probe.Record
-                    break
-                }
-                if ($probe.Result -notin @(0,267009,267011)) {
-                    throw "Guest worker failed to start or exited unexpectedly. Task result: $($probe.Result)"
-                }
-                if ($probe.Record) {
-                    # Status and Task Scheduler are separate reads. Confirm an
-                    # incomplete exit twice to allow a normal completion race.
-                    if (++$incompleteObservations -ge 2) {
-                        throw "Guest worker exited without a final status. Task result: $($probe.Result)"
+                    if ($probe.TaskState -in @('Running','Queued')) {
+                        $incompleteObservations = 0
+                        continue
                     }
-                } elseif ((Get-Date) -ge $workerStartDeadline) {
-                    throw 'Guest worker did not publish a status within two minutes.'
-                }
-            } while ((Get-Date) -lt $deadline)
-            if (-not $status) { throw 'Update worker timed out or became unreachable. VM left running; previous checkpoint preserved.' }
-            $outcome.Passes += $status
-            Write-Log "$($status.State): $($status.Message)"
-            foreach ($title in $status.Applied) { Write-Log "Install operation succeeded (reboot/final scan may still be required): $title" }
-            if ($status.State -eq 'Failed') { throw $status.Message }
+                    if ($probe.TaskState -ne 'Ready') { throw "Guest worker is $($probe.TaskState). Task result: $($probe.Result)" }
+                    if ($probe.Record -and $probe.Record.State -ne 'Running') {
+                        if ($probe.Record.State -ne 'Failed' -and $probe.Result -ne 0) {
+                            throw "Guest worker exited unsuccessfully. Task result: $($probe.Result)"
+                        }
+                        $status = $probe.Record
+                        break
+                    }
+                    if ($probe.Result -notin @(0,267009,267011)) {
+                        throw "Guest worker failed to start or exited unexpectedly. Task result: $($probe.Result)"
+                    }
+                    if ($probe.Record) {
+                        # Status and Task Scheduler are separate reads. Confirm an
+                        # incomplete exit twice to allow a normal completion race.
+                        if (++$incompleteObservations -ge 2) {
+                            throw "Guest worker exited without a final status. Task result: $($probe.Result)"
+                        }
+                    } elseif ((Get-Date) -ge $workerStartDeadline) {
+                        throw 'Guest worker did not publish a status within two minutes.'
+                    }
+                } while ((Get-Date) -lt $deadline)
+                if (-not $status) { throw 'Update worker timed out or became unreachable; previous checkpoint preserved.' }
+                $outcome.Passes += $status
+                Write-Log "$($status.State): $($status.Message)"
+                foreach ($title in $status.Applied) { Write-Log "Install operation succeeded (reboot/final scan may still be required): $title" }
+                if ($status.State -eq 'Failed') { throw $status.Message }
+            } catch {
+                # Servicing can restart Windows by itself during a pass, e.g. a
+                # second restart after a cumulative update. Repeat the pass
+                # after such a restart; any other failure stands.
+                $failure = $_
+                $restartedBoot = Wait-GuestRestart -PreviousBoot $boot
+                if (-not $restartedBoot) { throw $failure }
+                if (++$reboots -gt 6) { throw 'Six-restart limit reached; previous checkpoint preserved.' }
+                Write-Log "Windows restarted itself during the pass ($($failure.Exception.Message)); repeating the pass."
+                $boot = $restartedBoot
+                $mode = $passMode
+                continue
+            }
             if ($status.State -eq 'UpToDate') {
                 if ($cleanupComplete) { $ready=$true; break }
                 $mode = 'Cleanup'
@@ -330,8 +388,9 @@ try {
     $outcome.State = 'Failed'
     $outcome.Message = $_.Exception.Message
     Write-Log "FAILED: $($outcome.Message)"
-    # A live updater must never be interrupted by a forced power-off.
-    # Update failures preserve the old checkpoint.
+    # Update failures preserve the old checkpoint. Only a VM this run started
+    # is shut down, and only cleanly from inside Windows.
+    if ($startedVM) { Stop-GuestAfterFailure }
 } finally {
     try {
         $outcome['Finished'] = (Get-Date).ToString('o')
