@@ -431,3 +431,5 @@ FodyWeavers.xsd
 # Cached DVMS installers and license files
 /VM-DVMS/.cache/
 /VM-DVMS/License*.lic
+/VM-DVMS-v10/.cache/
+/VM-DVMS-v10/License*.lic

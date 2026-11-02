@@ -31,8 +31,12 @@ WHAT IT DOES
 3. Copies the installer to .cache\<version>\ on the host. A cached copy with the
    same size and time is reused; older builds of that version are replaced.
 4. Copies the template and sets the Windows computer name, exactly as
-   ..\VM-NightlyUpdate\Create-VM.cmd does. The copy's clean checkpoint is
-   the renamed Windows state before DVMS is installed.
+   ..\VM-NightlyUpdate\Create-VM.cmd does. Before that first boot it attaches
+   a dynamically expanding disk for recordings,
+   <destination>\Virtual Hard Disks\Storage.vhdx (-StorageSizeGB, default 200),
+   and during the boot formats it as NTFS drive D: labelled Storage. The DVD
+   drive moves to the next free letter. The copy's clean checkpoint is the
+   renamed Windows state with D: ready, before DVMS is installed.
 5. Reads the network adapter's MAC address and makes it static, so moving or
    importing the VM cannot change it and invalidate the license.
 6. Replaces the license's first MAC entry with the VM's MAC (other entries are
@@ -44,13 +48,14 @@ WHAT IT DOES
    /norestart lets the script restart Windows itself when the installer returns
    3010. Override the switches with -InstallerArguments; /log is always added.
 9. Copies the installer logs to "<destination>\Install logs", removes the
-   installer from the VM, confirms a DVMS product is registered and the license
-   file is still present. The VM is left running.
+   installer from the VM, confirms a DVMS product is registered, D: is present
+   and the license file is still there. The VM is left running.
 
 PARAMETERS (all optional; supplying one skips its question)
   -Name, -Destination, -ComputerName, -Version, -Installer (file name),
   -LicensePath, -TemplateName, -CheckpointName, -BuildRoot, -LegacyRepository,
-  -InstallerArguments, -InstallTimeoutMinutes (default 120), -NoPause
+  -InstallerArguments, -InstallTimeoutMinutes (default 120),
+  -StorageSizeGB (default 200), -NoPause
 Example:
   .\New-VM-DVMS.ps1 -Name 'DVMS main' -ComputerName 'DVMS-MAIN' -Version main -LicensePath D:\License.lic
 
@@ -60,7 +65,8 @@ REQUIREMENTS
 - The template must be off, with exactly one clean checkpoint.
 - git on PATH and the legacy repository checked out.
 - Free space on the VM drive for a full template copy plus the installer and
-  10 GB, and on the cache drive for the installer.
+  10 GB, and on the cache drive for the installer. The storage disk starts
+  small and grows on the VM drive as recordings are written, up to its size.
 
 FAILURES
 Nothing is deleted on failure. The VM, its files, the host license copy and any

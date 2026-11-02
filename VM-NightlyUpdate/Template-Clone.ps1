@@ -181,7 +181,11 @@ function Set-VMCopyComputerName {
         [Parameter(Mandatory=$true)][string]$ComputerName,
         [Parameter(Mandatory=$true)][Management.Automation.PSCredential]$Credential,
         [ValidateNotNullOrEmpty()][string]$CheckpointName = 'clean',
-        [int]$TimeoutMinutes = 20
+        [int]$TimeoutMinutes = 20,
+        # Optional extra guest step, run before the checkpoint is refreshed so
+        # the checkpoint includes its result.
+        [scriptblock]$GuestSetup,
+        [object[]]$GuestSetupArguments = @()
     )
     $ErrorActionPreference='Stop'
     if (-not (Test-GuestComputerName $ComputerName)) { throw "'$ComputerName' is not a valid Windows computer name: use up to 15 letters, digits and hyphens." }
@@ -221,6 +225,7 @@ function Set-VMCopyComputerName {
         $guest=Wait-CopyGuest $login $guest.Boot
         if ($guest.Name -ne $ComputerName) { throw "Windows reports computer name '$($guest.Name)' after restart; expected '$ComputerName'." }
     } else { $login=$Credential }
+    if ($GuestSetup) { Invoke-VMGuestCommand -VMId $VMId -Credential $login -Script $GuestSetup -Arguments $GuestSetupArguments -TimeoutSeconds 600 | Out-Null }
     Write-Host 'Computer name set. Shutting down Windows to refresh the checkpoint...'
     try {
         Invoke-CopyGuest $login {

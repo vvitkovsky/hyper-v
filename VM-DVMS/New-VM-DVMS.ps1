@@ -16,6 +16,7 @@ param(
     [string]$LegacyRepository = 'A:\src\legacy',
     [string]$InstallerArguments = '/i /q /norestart',
     [int]$InstallTimeoutMinutes = 120,
+    [ValidateRange(1,65536)][int]$StorageSizeGB = 200,
     [switch]$NoPause
 )
 $ErrorActionPreference='Stop'
@@ -41,6 +42,7 @@ try {
     foreach ($file in @('Maintenance-Common.ps1','Credential-Input.ps1','VM-Registration.ps1','Template-Clone.ps1')) { . (Join-Path $nightlyUpdate $file) }
     . (Join-Path $PSScriptRoot 'DVMS-License.ps1')
     . (Join-Path $PSScriptRoot 'DVMS-Build.ps1')
+    . (Join-Path $PSScriptRoot 'DVMS-Storage.ps1')
 
     # Ask everything first so the long copy and install run unattended.
     $template=Get-TemplateVM $TemplateName
@@ -110,13 +112,15 @@ try {
     Write-Host "Destination:    $($settings.Destination)"
     Write-Host "Computer name:  $($settings.ComputerName)"
     Write-Host "DVMS installer: $($selected.FullName)"
+    Write-Host "Storage disk:   D:, $StorageSizeGB GB, dynamically expanding"
     Write-Host ("License:        {0} (product {1}, serial {2}, MACs {3})" -f $LicensePath,$license.Product,$license.SerialNumber,($license.Macs -join ', '))
     Write-Host ''
 
     $cached=Save-DVMSInstaller -Source $selected -CacheDirectory $cacheDirectory
     Write-Host "Copying template to $($settings.Destination), please wait..."
     $copy=Copy-VMTemplate -TemplateName $TemplateName -Name $settings.Name -Destination $settings.Destination -CheckpointName $CheckpointName
-    $null=Set-VMCopyComputerName -VMId $copy.Id -ComputerName $settings.ComputerName -Credential $credential -CheckpointName $CheckpointName
+    $storageBytes=Add-DVMSStorageDisk -VMId $copy.Id -Destination $settings.Destination -SizeGB $StorageSizeGB
+    $null=Set-VMCopyComputerName -VMId $copy.Id -ComputerName $settings.ComputerName -Credential $credential -CheckpointName $CheckpointName -GuestSetup $DVMSStorageGuestSetup -GuestSetupArguments @($storageBytes)
 
     # The rename has started the VM once, so Hyper-V has assigned its MAC address.
     $vm=Get-VM -Id $copy.Id
@@ -205,15 +209,18 @@ try {
             Products=@(Get-ItemProperty $keys -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like '*DVMS*' } |
                 ForEach-Object { "$($_.DisplayName) $($_.DisplayVersion)" } | Sort-Object -Unique)
             License=Test-Path -LiteralPath (Join-Path $env:ProgramFiles 'DVMS\Licenses\License.lic')
+            Storage=[bool](Get-Volume -DriveLetter D -ErrorAction SilentlyContinue | Where-Object FileSystemLabel -EQ 'Storage')
         }
     }
     if (-not $installed.Products.Count) { throw "The installer reported success, but no DVMS product is registered in the VM. Logs: $hostLogs" }
+    if (-not $installed.Storage) { throw 'The Storage volume D: is missing in the VM.' }
     if (-not $installed.License) { Write-Warning 'C:\Program Files\DVMS\Licenses\License.lic is missing after installation.' }
 
     Write-Host ''
     Write-Host "DVMS VM ready: $($settings.Name) (computer name $($settings.ComputerName), MAC $mac)." -ForegroundColor Green
     foreach ($product in $installed.Products) { Write-Host "  Installed: $product" }
     Write-Host "  License: C:\Program Files\DVMS\Licenses\License.lic (host copy: $hostLicense)"
+    Write-Host "  Storage: D: ($StorageSizeGB GB, Virtual Hard Disks\Storage.vhdx)"
     Write-Host "  Installer logs: $hostLogs"
     Write-Host "  The VM is running. Checkpoint '$CheckpointName' is the renamed Windows state before DVMS was installed."
     $exitCode=0
