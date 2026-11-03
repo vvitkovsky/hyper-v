@@ -100,10 +100,7 @@ try {
         Write-Host "Looking for DVMS builds with microservice scripts in $BuildRoot..."
         $versions=@(Get-DVMSBuildVersions $BuildRoot | Where-Object { Test-Path -LiteralPath (Get-DVMSServicesScriptPath $BuildRoot $_.Version) -PathType Leaf } | Sort-Object Updated -Descending)
         if (-not $versions.Count) { throw "No DVMS version under $BuildRoot has both an installer and scripts\install.cmd." }
-        Write-Host 'Available versions (newest first):'
-        foreach ($item in $versions) { Write-Host ("  {0,-30} {1:yyyy-MM-dd HH:mm}" -f $item.Version,$item.Updated) }
-        $entered=(Read-Host 'DVMS version [main]').Trim()
-        $Version=if ($entered) { $entered } else { 'main' }
+        $Version=Read-DVMSVersionChoice -Versions $versions
     }
     $installers=@(Get-DVMSInstallers -BuildRoot $BuildRoot -Version $Version)
     if (-not $installers.Count) { throw "No DVMS installer was found in $(Join-Path $BuildRoot $Version)." }

@@ -8,7 +8,8 @@ All questions come first, so the slow steps then run unattended:
   New VM name [Windows 11 Test]:
   Destination [A:\VMs\<chosen name>]:
   Windows computer name [WIN11-Test]:
-  DVMS version [main]:            (the list shows version folders on the share)
+  DVMS version [<number of main>]: (numbered list of version folders on the share;
+                                   type a number or a version name)
   Installer [1]:                  (only when the version has several installers)
   License file [<this folder>\License.lic]:
 Press Enter to accept each default.

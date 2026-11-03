@@ -19,6 +19,24 @@ function Get-DVMSBuildVersions([string]$BuildRoot) {
     }
 }
 
+function Read-DVMSVersionChoice {
+    # Numbered list in the given order; Enter picks $Default (or 1 when it is
+    # not listed), and a typed version name still works.
+    param([Parameter(Mandatory=$true)][object[]]$Versions,[string]$Default='main')
+    $index=[array]::IndexOf([string[]]@($Versions | ForEach-Object Version),$Default)
+    $defaultNumber=if ($index -ge 0) { $index+1 } else { 1 }
+    Write-Host 'Available versions (newest first):'
+    for ($i=0; $i -lt $Versions.Count; $i++) { Write-Host ("  {0}. {1,-30} {2:yyyy-MM-dd HH:mm}" -f ($i+1),$Versions[$i].Version,$Versions[$i].Updated) }
+    $entered=(Read-Host "DVMS version [$defaultNumber]").Trim()
+    if (-not $entered) { return $Versions[$defaultNumber-1].Version }
+    $choice=0
+    if ([int]::TryParse($entered,[ref]$choice)) {
+        if ($choice -lt 1 -or $choice -gt $Versions.Count) { throw "Enter a number from 1 to $($Versions.Count)." }
+        return $Versions[$choice-1].Version
+    }
+    $entered
+}
+
 function Get-DVMSInstallers([string]$BuildRoot,[string]$Version) {
     # Unbranded installers first, then full (Full/Complete) before limited (Limited/Update).
     $folder=Join-Path $BuildRoot $Version

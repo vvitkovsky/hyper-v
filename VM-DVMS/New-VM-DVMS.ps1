@@ -53,10 +53,7 @@ try {
         Write-Host "Looking for DVMS builds in $BuildRoot..."
         $versions=@(Get-DVMSBuildVersions $BuildRoot | Sort-Object Updated -Descending)
         if (-not $versions.Count) { throw "No DVMS installers were found under $BuildRoot." }
-        Write-Host 'Available versions (newest first):'
-        foreach ($item in $versions) { Write-Host ("  {0,-30} {1:yyyy-MM-dd HH:mm}" -f $item.Version,$item.Updated) }
-        $entered=(Read-Host 'DVMS version [main]').Trim()
-        $Version=if ($entered) { $entered } else { 'main' }
+        $Version=Read-DVMSVersionChoice -Versions $versions
     }
     $installers=@(Get-DVMSInstallers -BuildRoot $BuildRoot -Version $Version)
     if (-not $installers.Count) { throw "No DVMS installer was found in $(Join-Path $BuildRoot $Version)." }
