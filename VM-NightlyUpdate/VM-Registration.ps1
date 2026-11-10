@@ -71,6 +71,46 @@ function Get-VMUpdateRegistration {
     [pscustomobject]@{VM=$vm;Root=$root;ScriptDirectory=$base;TaskName=$taskName}
 }
 
+function Get-VMUpdateInstallations {
+    # Installations kept under <BaseDirectory>\.state, one per VM ID.
+    param([Parameter(Mandatory=$true)][string]$BaseDirectory)
+    $stateBase=Join-Path ([IO.Path]::GetFullPath($BaseDirectory)) '.state'
+    if (-not (Test-Path -LiteralPath $stateBase)) { return }
+    foreach ($directory in Get-ChildItem -LiteralPath $stateBase -Directory -Force) {
+        $parsedId=[guid]::Empty
+        $path=Join-Path $directory.FullName 'config.json'
+        if (-not [guid]::TryParse($directory.Name,[ref]$parsedId) -or -not (Test-Path -LiteralPath $path)) { continue }
+        $saved=Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+        $time=$null
+        if ($saved.PSObject.Properties['Schedule'] -and [string]$saved.Schedule -match '^(\d\d:\d\d)') { $time=$Matches[1] }
+        $checkpoint='clean'
+        if ($saved.PSObject.Properties['Checkpoint'] -and $saved.Checkpoint) { $checkpoint=[string]$saved.Checkpoint }
+        [pscustomobject]@{VMName=[string]$saved.VMName;VMId=[guid]$saved.VMId;Time=$time;Checkpoint=$checkpoint;Root=$directory.FullName}
+    }
+}
+
+function Read-VMUpdateChoice {
+    # Numbered list of Items (Name, Detail). Enter picks the item named
+    # $Default; without one listed, an answer is required. A typed name works too.
+    param([Parameter(Mandatory=$true)][string]$Prompt,[Parameter(Mandatory=$true)][object[]]$Items,[string]$Default)
+    $defaultNumber=0
+    for ($i=0; $i -lt $Items.Count; $i++) {
+        if ($Default -and -not $defaultNumber -and $Items[$i].Name -eq $Default) { $defaultNumber=$i+1 }
+        Write-Host ("  {0}. {1,-32} {2}" -f ($i+1),$Items[$i].Name,$Items[$i].Detail)
+    }
+    $entered=(Read-Host $(if ($defaultNumber) { "$Prompt [$defaultNumber]" } else { $Prompt })).Trim()
+    if (-not $entered) {
+        if ($defaultNumber) { return $Items[$defaultNumber-1].Name }
+        throw "Enter a number from 1 to $($Items.Count)."
+    }
+    $choice=0
+    if ([int]::TryParse($entered,[ref]$choice)) {
+        if ($choice -lt 1 -or $choice -gt $Items.Count) { throw "Enter a number from 1 to $($Items.Count)." }
+        return $Items[$choice-1].Name
+    }
+    $entered
+}
+
 function Assert-VMUpdateRemovalPath {
     [CmdletBinding()]
     param(

@@ -191,6 +191,6 @@ Earlier evidence (not repeated for this revision):
   and clean checkpoint refresh at 10:16:52 Europe/Helsinki, task result 0.
 
 Run Install.cmd from the permanent folder to apply this version.
-Retain .state and your Install.cmd VM/time/checkpoint settings. Existing encrypted guest
+Retain .state; Enter keeps each VM's time and checkpoint. Existing encrypted guest
 credentials can be reused. The ZIP contains source/documentation only, with no
 generated state, credentials, or logs.

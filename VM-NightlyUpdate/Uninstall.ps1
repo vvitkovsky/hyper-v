@@ -1,14 +1,19 @@
 #Requires -Version 5.1
 [CmdletBinding(SupportsShouldProcess=$true)]
 param(
-    [ValidateNotNullOrEmpty()][string]$VMName = 'Windows 11 Template',
+    # Left empty, the VM is chosen from the installations in this folder.
+    [string]$VMName,
     [switch]$NoPause
 )
 $ErrorActionPreference = 'Stop'
 $isAdmin = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
-    if ($PSBoundParameters.Count -gt 0) { throw 'When supplying parameters, open PowerShell as administrator and run Uninstall.ps1 there.' }
-    $process = Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -Verb RunAs -Wait -PassThru -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`""
+    if (@($PSBoundParameters.Keys | Where-Object { $_ -notin @('VMName','NoPause') }).Count -gt 0) { throw 'When supplying -WhatIf or other options, open PowerShell as administrator and run Uninstall.ps1 there.' }
+    $command = "& '"+$PSCommandPath.Replace("'","''")+"'"
+    if ($PSBoundParameters.ContainsKey('VMName')) { $command += " -VMName '"+$VMName.Replace("'","''")+"'" }
+    if ($NoPause) { $command += ' -NoPause' }
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
+    $process = Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -Verb RunAs -Wait -PassThru -ArgumentList "-NoProfile -ExecutionPolicy Bypass -EncodedCommand $encoded"
     exit $process.ExitCode
 }
 $lock = $null
@@ -17,9 +22,18 @@ $exitCode = 1
 try {
     . (Join-Path $PSScriptRoot 'VM-Registration.ps1')
     . (Join-Path $PSScriptRoot 'Maintenance-Common.ps1')
-    $registration = Get-VMUpdateRegistration -VMName $VMName -BaseDirectory $PSScriptRoot -InstalledOnly
+    if ([string]::IsNullOrWhiteSpace($VMName)) {
+        $installations = @(Get-VMUpdateInstallations -BaseDirectory $PSScriptRoot | Sort-Object VMName)
+        if ($installations.Count) {
+            Write-Host 'Nightly updates installed from this folder:'
+            $VMName = Read-VMUpdateChoice -Prompt 'VM to stop updating' -Items @($installations | ForEach-Object {
+                [pscustomobject]@{ Name=$_.VMName; Detail="nightly at $($_.Time), checkpoint $($_.Checkpoint)" }
+            })
+        }
+    }
+    $registration = if ($VMName) { Get-VMUpdateRegistration -VMName $VMName -BaseDirectory $PSScriptRoot -InstalledOnly } else { $null }
     if (-not $registration) {
-        Write-Host "No installed nightly update configuration was found for '$VMName'."
+        Write-Host $(if ($VMName) { "No installed nightly update configuration was found for '$VMName'." } else { 'No nightly updates are installed from this folder.' })
         if (-not $NoPause -and -not $WhatIfPreference) {
             Write-Host 'Press any key to continue...' -NoNewline
             $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')

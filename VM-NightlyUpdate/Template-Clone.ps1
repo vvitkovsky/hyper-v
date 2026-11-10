@@ -80,8 +80,9 @@ function Copy-VMTemplate {
 }
 
 function ConvertTo-GuestComputerName([string]$VMName) {
-    # 'Windows 11 Test 2' becomes 'WIN11-Test-2'; Windows allows 15 characters.
-    $candidate=(($VMName -replace '^\s*Windows\s*(\d+)','WIN$1') -replace '[^A-Za-z0-9]+','-').Trim('-')
+    # 'Windows 11 Test 2' becomes 'WIN11-Test-2' and 'Windows Server 2025 Test'
+    # becomes 'WS2025-Test'; Windows allows 15 characters.
+    $candidate=((($VMName -replace '^\s*Windows\s*Server\s*(\d+)','WS$1') -replace '^\s*Windows\s*(\d+)','WIN$1') -replace '[^A-Za-z0-9]+','-').Trim('-')
     if ($candidate.Length -gt 15) { $candidate=$candidate.Substring(0,15).TrimEnd('-') }
     $candidate
 }
@@ -109,10 +110,10 @@ function Get-TemplateGuestCredential {
 
 function Read-TemplateCopySettings {
     # Values left empty are prompted for; Enter accepts each default.
-    param([string]$Name,[string]$Destination,[string]$ComputerName,[switch]$KeepComputerName)
+    param([string]$Name,[string]$Destination,[string]$ComputerName,[switch]$KeepComputerName,[string]$DefaultName='Windows 11 Test')
     if ([string]::IsNullOrWhiteSpace($Name)) {
-        $entered=(Read-Host 'New VM name [Windows 11 Test]').Trim()
-        $Name=if ([string]::IsNullOrWhiteSpace($entered)) { 'Windows 11 Test' } else { $entered }
+        $entered=(Read-Host "New VM name [$DefaultName]").Trim()
+        $Name=if ([string]::IsNullOrWhiteSpace($entered)) { $DefaultName } else { $entered }
     }
     if ([string]::IsNullOrWhiteSpace($Destination)) {
         if ($Name.IndexOfAny([IO.Path]::GetInvalidFileNameChars()) -ge 0 -or

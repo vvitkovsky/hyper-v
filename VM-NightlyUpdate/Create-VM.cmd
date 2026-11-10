@@ -1,8 +1,7 @@
 @echo off
 setlocal DisableDelayedExpansion
-rem Prompts default to Windows 11 Test, A:\VMs\<chosen name> and a computer name
-rem derived from the VM name, such as WIN11-Test; Enter accepts each.
-set "TEMPLATE_NAME=Windows 11 Template"
-set "CHECKPOINT_NAME=clean"
-"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "%~dp0Create-VM.ps1" -TemplateName "%TEMPLATE_NAME%" -CheckpointName "%CHECKPOINT_NAME%" %*
+rem Asks for the template (those installed with Install.cmd), the VM name, the
+rem destination and the computer name; Enter accepts each default. Parameters
+rem such as -TemplateName "Windows Server 2025 Template" are forwarded.
+"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "%~dp0Create-VM.ps1" %*
 exit /b %errorlevel%

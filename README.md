@@ -46,11 +46,13 @@ VM-NightlyUpdate nightly task ──► Windows 11 Template   (A:\HyperV Templat
 ## Quick start
 
 1. **Once:** set up nightly maintenance for the template. Run
-   `VM-NightlyUpdate\Install.cmd`, approve elevation and enter an administrator
-   account from inside the template VM. The credential is saved encrypted under
+   `VM-NightlyUpdate\Install.cmd`, approve elevation, choose the template from
+   the VM list (Enter picks Windows 11 Template), the time and the checkpoint,
+   and enter an administrator account from inside the template VM. Run it again
+   to update another VM, such as a Windows Server template. The credential is saved encrypted under
    `VM-NightlyUpdate\.state` and reused by every other script.
 2. **A plain test VM:** run `VM-NightlyUpdate\Create-VM.cmd` and answer the
-   prompts (name, destination, computer name). Enter accepts each default.
+   prompts (template, name, destination, computer name). Enter accepts each default.
 3. **A DVMS test VM:** put a license at `VM-DVMS\License.lic` (or give another
    path when asked), run `VM-DVMS\New-VM-DVMS.cmd` and choose the version
    (default `main`) and installer.

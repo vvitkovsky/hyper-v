@@ -1,9 +1,10 @@
 #Requires -Version 5.1
 [CmdletBinding()]
 param(
-    [ValidateNotNullOrEmpty()][string]$VMName = 'Windows 11 Template',
-    [ValidatePattern('^(?:[01][0-9]|2[0-3]):[0-5][0-9]$')][string]$ScheduledTime = '00:00',
-    [ValidateNotNullOrEmpty()][ValidateScript({-not [string]::IsNullOrWhiteSpace($_)})][string]$CheckpointName = 'clean',
+    # Values left empty are asked for after elevation.
+    [string]$VMName,
+    [string]$ScheduledTime,
+    [string]$CheckpointName,
     [Alias('UserName')][string]$VMUserName,
     [Alias('Password')][object]$VMPassword,
     [Alias('Credential')][Management.Automation.PSCredential]$VMCredential,
@@ -15,7 +16,10 @@ if (-not $isAdmin) {
     if ($PSBoundParameters.ContainsKey('VMUserName') -or $PSBoundParameters.ContainsKey('VMPassword') -or $PSBoundParameters.ContainsKey('VMCredential')) {
         throw 'When supplying parameters, open PowerShell as administrator and run Install.ps1 there. Credentials are not forwarded through UAC command-line arguments.'
     }
-    $command = "& '"+$PSCommandPath.Replace("'","''")+"' -VMName '"+$VMName.Replace("'","''")+"' -ScheduledTime '$ScheduledTime' -CheckpointName '"+$CheckpointName.Replace("'","''")+"'"
+    $command = "& '"+$PSCommandPath.Replace("'","''")+"'"
+    foreach ($name in @('VMName','ScheduledTime','CheckpointName')) {
+        if ($PSBoundParameters.ContainsKey($name)) { $command += " -$name '"+([string]$PSBoundParameters[$name]).Replace("'","''")+"'" }
+    }
     if ($NoPause) { $command += ' -NoPause' }
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
     $process = Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -Verb RunAs -Wait -PassThru -ArgumentList "-NoProfile -ExecutionPolicy Bypass -EncodedCommand $encoded"
@@ -30,7 +34,33 @@ try {
     . (Join-Path $PSScriptRoot 'Maintenance-Common.ps1')
     Import-Module Hyper-V
     Add-Type -AssemblyName System.Security
+    $installations = @(Get-VMUpdateInstallations -BaseDirectory $PSScriptRoot)
+    if ([string]::IsNullOrWhiteSpace($VMName)) {
+        $vms = @(Get-VM | Sort-Object Name)
+        if (-not $vms.Count) { throw 'No Hyper-V VMs were found on this host.' }
+        Write-Host 'Hyper-V VMs:'
+        $VMName = Read-VMUpdateChoice -Prompt 'VM to update nightly' -Default 'Windows 11 Template' -Items @(foreach ($candidate in $vms) {
+            $installed = @($installations | Where-Object VMId -EQ $candidate.Id)
+            $detail = if ($installed.Count) { "updated nightly at $($installed[0].Time), checkpoint $($installed[0].Checkpoint)" } else { '' }
+            [pscustomobject]@{ Name=$candidate.Name; Detail=$detail }
+        })
+    }
     $registration = Get-VMUpdateRegistration -VMName $VMName -BaseDirectory $PSScriptRoot
+    # A reinstall offers the VM's current time and checkpoint as defaults.
+    $current = @($installations | Where-Object VMId -EQ $registration.VM.Id)
+    if ([string]::IsNullOrWhiteSpace($ScheduledTime)) {
+        $default = if ($current.Count -and $current[0].Time) { $current[0].Time } else { '00:00' }
+        $entered = (Read-Host "Daily time, 24-hour HH:mm host time [$default]").Trim()
+        $ScheduledTime = if ($entered) { $entered } else { $default }
+    }
+    if ($ScheduledTime -notmatch '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$') { throw "'$ScheduledTime' is not a 24-hour HH:mm time, for example 00:00 or 02:30." }
+    if ([string]::IsNullOrWhiteSpace($CheckpointName)) {
+        $default = if ($current.Count) { $current[0].Checkpoint } else { 'clean' }
+        $entered = (Read-Host "Checkpoint to refresh [$default]").Trim()
+        $CheckpointName = if ($entered) { $entered } else { $default }
+    }
+    $sameTime = @($installations | Where-Object { $_.VMId -ne $registration.VM.Id -and $_.Time -eq $ScheduledTime } | ForEach-Object VMName)
+    if ($sameTime.Count) { Write-Warning "$($sameTime -join ', ') is also updated at $ScheduledTime. The VMs will then run at the same time and need host memory together." }
     $vmMutex = Enter-VMUpdateMutex -VMId $registration.VM.Id
     # Re-read persisted registration while holding the per-VM lifecycle lock.
     $registration = Get-VMUpdateRegistration -VMName $VMName -BaseDirectory $PSScriptRoot

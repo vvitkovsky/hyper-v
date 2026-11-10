@@ -2,19 +2,28 @@ Nightly Hyper-V Windows updates - run from this folder
 
 QUICK SETUP
 1. Extract the package to the permanent local folder you want to use.
-2. Edit these three lines near the top of Install.cmd:
-   set "VM_NAME=Windows 11 Template"
-   set "SCHEDULED_TIME=00:00"
-   set "CHECKPOINT_NAME=clean"
-3. Run Install.cmd and approve administrator elevation.
+2. Run Install.cmd and approve administrator elevation.
+3. Answer its questions; Enter accepts each default:
+     Hyper-V VMs:
+       1. Windows 11 Template              updated nightly at 00:00, checkpoint clean
+       2. Windows Server 2025 Template
+     VM to update nightly [1]:
+     Daily time, 24-hour HH:mm host time [00:00]:
+     Checkpoint to refresh [clean]:
 4. Enter a VM administrator account and password if no saved credential exists.
 
-VM_NAME is the exact Hyper-V display name. SCHEDULED_TIME is a 24-hour HH:mm
-time in the HOST's local time zone, for example 00:00 or 02:30.
-CHECKPOINT_NAME is the exact checkpoint name to refresh after successful
-maintenance. It defaults to clean and cannot be empty or whitespace.
-Changing it selects a different checkpoint; checkpoints with other names,
-including the previously selected name, are preserved.
+Run Install.cmd once per VM to update several VMs; each gets its own task,
+credential and .state folder. The VM list shows every Hyper-V VM on the host
+(type its number or its exact name) and marks the ones already updated from
+this folder. Enter picks Windows 11 Template when it exists; otherwise a
+number is required. The time is in the HOST's local time zone, for example
+00:00 or 02:30. For a VM that is already installed, the time and checkpoint
+default to its current ones, so Enter keeps them. VMs given the same time are
+updated together and need host memory together; setup warns about that.
+The checkpoint is the exact checkpoint name to refresh after successful
+maintenance. It defaults to clean. Changing it selects a different
+checkpoint; checkpoints with other names, including the previously selected
+name, are preserved.
 
 The task runs Nightly-Update.ps1 directly from THIS installer folder. No host
 scripts are copied to ProgramData. Keep this folder at its installed location;
@@ -24,8 +33,8 @@ start, stop, restore, or update the VM immediately.
 
 UPDATING THESE SCRIPTS
 Wait for any existing maintenance run to finish, then replace the package files
-in your permanent folder. Keep your VM_NAME, SCHEDULED_TIME, and CHECKPOINT_NAME settings in
-Install.cmd and retain the .state directory. Run Install.cmd again; saved guest
+in your permanent folder and retain the .state directory. Run Install.cmd
+again for each VM and press Enter to keep its time and checkpoint; saved guest
 credentials are reused. Include Maintenance-Common.ps1 with the other scripts.
 Source-folder permissions remain unchanged for the requested testing setup.
 
@@ -41,23 +50,34 @@ refreshes clean (or the configured checkpoint). It does not export anything.
 Working VMs are independent and are not updated by the template's task.
 Changes to the template affect copies created afterward, not existing copies.
 
-To create a VM, run Create-VM.cmd. It prompts for the name, destination and
-Windows computer name:
+To create a VM, run Create-VM.cmd. It prompts for the template, name,
+destination and Windows computer name:
+  Templates (VMs updated nightly from this folder):
+    1. Windows 11 Template              checkpoint clean
+    2. Windows Server 2025 Template     checkpoint clean
+  Template to copy [1]:
   New VM name [Windows 11 Test]:
   Destination [A:\VMs\<chosen name>]:
   Windows computer name [WIN11-Test]:
-Press Enter to accept each default, or type your own value. The default path
-uses the name you chose. Names used as folders must be valid Windows folder
-names. The default computer name is derived from the VM name: a leading
-"Windows 11" becomes WIN11, other characters become hyphens, and the result is
-cut to 15 characters. Pick distinct computer names for VMs that run together.
+Press Enter to accept each default, or type your own value. The templates are
+the VMs installed with Install.cmd from this folder; type a number or the exact
+name. Enter picks Windows 11 Template (or the only template); a template that
+is not off is marked, because it cannot be copied until it is shut down. The
+checkpoint copied is the one the template's nightly task refreshes.
+The default VM name is the template name with "Template" replaced by "Test",
+for example Windows Server 2025 Test. The default path uses the name you chose.
+Names used as folders must be valid Windows folder names. The default computer
+name is derived from the VM name: a leading "Windows Server 2025" becomes
+WS2025 and "Windows 11" becomes WIN11, other characters become hyphens, and the
+result is cut to 15 characters. Pick distinct computer names for VMs that run
+together.
 To supply all values directly and skip the prompts:
-  .\Create-VM.ps1 -Name 'Windows 11 Test' -Destination 'A:\VMs\Windows 11 Test' -ComputerName 'WIN11-Test'
-Optional parameters: -Name, -Destination, -ComputerName, -KeepComputerName,
--TemplateName, -CheckpointName, -NoPause. Create-VM.cmd forwards them to PowerShell.
-Supplying -Name, -Destination or -ComputerName skips its prompt. The prompts
-appear after administrator elevation.
-The default template is Windows 11 Template and the required checkpoint is clean.
+  .\Create-VM.ps1 -TemplateName 'Windows 11 Template' -Name 'Windows 11 Test' -Destination 'A:\VMs\Windows 11 Test' -ComputerName 'WIN11-Test'
+Optional parameters: -TemplateName, -Name, -Destination, -ComputerName,
+-KeepComputerName, -CheckpointName, -NoPause. Create-VM.cmd forwards them to
+PowerShell. Supplying -TemplateName, -Name, -Destination or -ComputerName skips
+its prompt; -TemplateName with -KeepComputerName also works for a VM without
+nightly updates. The prompts appear after administrator elevation.
 The script elevates automatically and leaves the created VM off, ready to start.
 
 The copy uses Import-VM -Copy -GenerateNewId directly from the stopped template.
@@ -86,15 +106,12 @@ Older Export-Checkpoint.ps1 is no longer used and can be removed from existing
 script installations. This package does not include it. Do not register or use
 the old managed export tree as an additional source after migration.
 COMMAND-LINE OVERRIDES
-Install.cmd passes its settings directly as -VMName, -ScheduledTime, and -CheckpointName.
-For one-off values, call the PowerShell installer directly:
+Supplying -VMName, -ScheduledTime or -CheckpointName skips its question.
+Install.cmd forwards them, and other options such as -NoPause, to PowerShell:
+Install.cmd -VMName "Windows 11 Template" -ScheduledTime 01:30 -CheckpointName baseline
 .\Install.ps1 -VMName 'Windows 11 Template' -ScheduledTime '01:30' -CheckpointName 'baseline'
 
-Other options, such as Install.cmd -NoPause, are forwarded to PowerShell.
-Do not repeat -VMName, -ScheduledTime, or -CheckpointName after Install.cmd: the launcher already
-supplies them. Edit its settings or use Install.ps1 directly.
-
-VM name and time can be passed through automatic elevation. If you pass
+VM name, time and checkpoint can be passed through automatic elevation. If you pass
 credentials as parameters, use PowerShell as administrator:
 .\Install.ps1 -VMName 'Windows 11 Template' -ScheduledTime '01:30' -VMUserName 'WIN11-PC\Victor' -VMPassword 'YOUR-VM-PASSWORD' -NoPause
 
@@ -108,7 +125,7 @@ $vmPassword = Read-Host 'VM password' -AsSecureString
 Or pass a PowerShell credential object:
 .\Install.ps1 -VMName 'Windows 11 Template' -ScheduledTime '01:30' -VMCredential (Get-Credential) -NoPause
 
-Install.ps1 defaults to Windows 11 Template, 00:00, and checkpoint clean when called without those
+Install.ps1 asks for the VM, time and checkpoint when called without those
 parameters. No environment-variable fallback is used. If only -VMUserName is supplied, setup
 asks for its password with masked input. -NoPause skips the closing
 'Press any key to continue...' prompt. Aliases -UserName, -Password, and
@@ -167,8 +184,11 @@ UNINSTALL (PowerShell as administrator, from this folder)
 Preview without changing anything:
 .\Uninstall.ps1 -VMName 'Windows 11 Template' -WhatIf
 
-Uninstall.cmd is the double-click option for Windows 11 Template and forwards parameters
-from an elevated console. Uninstall removes the selected task and that VM's
+Uninstall.cmd is the double-click option. It lists the VMs updated from this
+folder and asks which one to remove (a number or the exact name; there is no
+default). -VMName skips the question and also finds an older ProgramData
+installation. Parameters are forwarded; -WhatIf needs an elevated console.
+Uninstall removes the selected task and that VM's
 generated .state directory (credentials, configuration, and logs). It preserves
 the source script folder, VM, virtual disks, checkpoints, and other VM state.
 It needs no guest password and works after the VM has been deleted.

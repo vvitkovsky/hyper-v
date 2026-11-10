@@ -4,8 +4,10 @@ param(
     [ValidateNotNullOrEmpty()][string]$Name,
     [ValidateNotNullOrEmpty()][string]$Destination,
     [string]$ComputerName,
-    [string]$TemplateName = 'Windows 11 Template',
-    [string]$CheckpointName = 'clean',
+    # Left empty, the template is chosen from those installed with Install.cmd,
+    # and the checkpoint is the one its nightly task refreshes.
+    [string]$TemplateName,
+    [string]$CheckpointName,
     [switch]$KeepComputerName,
     [switch]$NoPause
 )
@@ -14,7 +16,7 @@ $isAdmin=[Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsI
 if (-not $isAdmin) {
     $command="& '"+$PSCommandPath.Replace("'","''")+"'"
     foreach ($parameter in @('Name','Destination','ComputerName','TemplateName','CheckpointName')) {
-        if ($parameter -in @('Name','Destination','ComputerName') -and -not $PSBoundParameters.ContainsKey($parameter)) { continue }
+        if (-not $PSBoundParameters.ContainsKey($parameter)) { continue }
         $value=[string](Get-Variable -Name $parameter -ValueOnly)
         $command+=" -$parameter '"+$value.Replace("'","''")+"'"
     }
@@ -33,8 +35,26 @@ try {
     . (Join-Path $PSScriptRoot 'VM-Registration.ps1')
     . (Join-Path $PSScriptRoot 'Template-Clone.ps1')
     if ($KeepComputerName -and $PSBoundParameters.ContainsKey('ComputerName')) { throw 'Use -ComputerName OR -KeepComputerName.' }
-    $null=Get-TemplateVM $TemplateName
-    $settings=Read-TemplateCopySettings -Name $Name -Destination $Destination -ComputerName $ComputerName -KeepComputerName:$KeepComputerName
+    $installations=@(Get-VMUpdateInstallations -BaseDirectory $PSScriptRoot | Sort-Object VMName)
+    if ([string]::IsNullOrWhiteSpace($TemplateName)) {
+        if (-not $installations.Count) { throw 'No template has nightly updates installed from this folder. Run Install.cmd for the template first, or supply -TemplateName.' }
+        $default=if (@($installations | Where-Object VMName -EQ 'Windows 11 Template').Count) { 'Windows 11 Template' } elseif ($installations.Count -eq 1) { $installations[0].VMName } else { $null }
+        Write-Host 'Templates (VMs updated nightly from this folder):'
+        $TemplateName=Read-VMUpdateChoice -Prompt 'Template to copy' -Default $default -Items @($installations | ForEach-Object {
+            $state=(Get-VM -Id $_.VMId -ErrorAction SilentlyContinue).State
+            $detail="checkpoint $($_.Checkpoint)"
+            if (-not $state) { $detail+=', VM not found' } elseif ($state -ne 'Off') { $detail+=", $state - shut it down before copying" }
+            [pscustomobject]@{ Name=$_.VMName; Detail=$detail }
+        })
+    }
+    $template=Get-TemplateVM $TemplateName
+    if ([string]::IsNullOrWhiteSpace($CheckpointName)) {
+        $installed=@($installations | Where-Object VMId -EQ $template.Id)
+        $CheckpointName=if ($installed.Count) { $installed[0].Checkpoint } else { 'clean' }
+    }
+    # 'Windows Server 2025 Template' suggests 'Windows Server 2025 Test'.
+    $defaultName=($TemplateName -replace '\s*\bTemplate$','').Trim()+' Test'
+    $settings=Read-TemplateCopySettings -Name $Name -Destination $Destination -ComputerName $ComputerName -KeepComputerName:$KeepComputerName -DefaultName $defaultName
     $Name=$settings.Name; $Destination=$settings.Destination; $ComputerName=$settings.ComputerName
     $credential=$null
     # Renaming signs in to the copy with the template's saved maintenance credential.
