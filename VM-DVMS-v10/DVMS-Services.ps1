@@ -53,13 +53,17 @@ function Read-DVMSServicesScript {
         }
     }
     if (-not $sources.Count) { throw "No share paths were found in $Path." }
-    $files=foreach ($source in $sources) {
+    # Folders such as set BUILD_SHARE=\\server\share only build other paths or
+    # are tested with if exist, so the mirror needs them but nothing is copied.
+    $files=New-Object Collections.Generic.List[object]
+    $folders=New-Object Collections.Generic.List[string]
+    foreach ($source in $sources) {
         $item=Get-Item -LiteralPath $source -ErrorAction SilentlyContinue
-        if (-not $item) { throw "install.cmd refers to a file that is not on the share: $source" }
-        $item
+        if (-not $item) { throw "install.cmd refers to a path that is not on the share: $source" }
+        if ($item.PSIsContainer) { $folders.Add($source.TrimEnd('\')) } else { $files.Add($item) }
     }
     [pscustomobject]@{
-        Path=$Path;Text=$text;Files=@($files);Checks=@($checks)
+        Path=$Path;Text=$text;Files=$files.ToArray();Folders=$folders.ToArray();Checks=$checks.ToArray()
         RestartMarker=$script:DVMSRestartMarker
         SignalsRestart=$text.Contains($script:DVMSRestartMarker)
     }
@@ -94,4 +98,27 @@ function Save-DVMSServiceFile {
 function Test-DVMSServiceFileCached([IO.FileInfo]$Source,[string]$CacheRoot) {
     $cached=Get-Item -LiteralPath (ConvertTo-DVMSMirrorPath $Source.FullName $CacheRoot) -ErrorAction SilentlyContinue
     [bool]($cached -and $cached.Length -eq $Source.Length -and $cached.LastWriteTimeUtc -eq $Source.LastWriteTimeUtc)
+}
+
+function Get-DVMSRecorderProxyInstaller {
+    # <Root>\<branch>\*.exe|*.msi: the folder named after the DVMS version, or
+    # else the folder with the newest installer; then its newest installer.
+    param([Parameter(Mandatory=$true)][string]$Root,[string]$Version)
+    if (-not (Test-Path -LiteralPath $Root -PathType Container)) { throw "Recorder proxy builds not found: $Root" }
+    $found=@(Get-ChildItem -LiteralPath $Root -Directory | ForEach-Object {
+        Get-ChildItem -LiteralPath $_.FullName -File | Where-Object Extension -In @('.exe','.msi')
+    } | Sort-Object LastWriteTimeUtc -Descending)
+    if (-not $found.Count) { throw "No recorder proxy installer (.exe or .msi) was found in a folder under $Root." }
+    $matching=@($found | Where-Object { $_.Directory.Name -eq $Version })
+    if ($matching.Count) { $matching[0] } else { $found[0] }
+}
+
+function Get-DVMSRecorderProxyCommand([string]$GuestPath,[string]$LogPath) {
+    # Silent install in the VM. .exe builds are WiX bundles, whose /log also
+    # writes each package's log beside it; an .msi goes through msiexec.
+    if ([IO.Path]::GetExtension($GuestPath) -eq '.msi') {
+        [pscustomobject]@{FilePath='msiexec.exe';Arguments="/i `"$GuestPath`" /qn /norestart /l*v `"$LogPath`""}
+    } else {
+        [pscustomobject]@{FilePath=$GuestPath;Arguments="/install /quiet /norestart /log `"$LogPath`""}
+    }
 }

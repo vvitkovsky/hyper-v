@@ -41,7 +41,8 @@ VM-NightlyUpdate nightly task ──► Windows 11 Template   (A:\HyperV Templat
 - **DVMS v10 copies** (`VM-DVMS-v10`) also run the build's
   `scripts\install.cmd` in the VM before the DVMS installer, with the
   microservice installers it needs copied in from the host, because the VM
-  cannot reach the build share.
+  cannot reach the build share. After the DVMS installer they install the
+  recorder proxy service from `VmsRecorderProxyService` on the same share.
 
 ## Quick start
 

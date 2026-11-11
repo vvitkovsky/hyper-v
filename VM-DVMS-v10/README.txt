@@ -6,6 +6,8 @@ the microservices that v10 builds need (NATS, Consul, PostgreSQL, MongoDB,
 OpenFGA, IAM, SSO, reverse proxy, observability and the VMS services) with the
 build's own install script:
   \\rdfileserver\builds\DVMS\<version>\scripts\install.cmd
+and after it installs the recorder proxy service from:
+  \\rdfileserver\builds\DVMS\VmsRecorderProxyService\<branch>\
 
 All questions come first, so the slow steps then run unattended:
   New VM name [Windows 11 Test]:
@@ -43,9 +45,22 @@ WHAT IT DOES
    is created.
 5. Steps 8-9 of ..\VM-DVMS\README.txt: runs the DVMS installer, copies its logs
    to "<destination>\Install logs" and restarts Windows when it returns 3010.
-6. Confirms a DVMS product is registered, D: is present, every MSI_CHECK file
-   from install.cmd exists and the license file is still there, and warns about VMS* Windows
-   services that are not running. The VM is left running.
+6. Installs the recorder proxy service. The installer is the newest .exe or
+   .msi in VmsRecorderProxyService\<version> when that folder exists, otherwise
+   in the folder with the newest installer (today main-recorder-proxy, so
+   VmsRecorderProxyServiceSetup.exe); -RecorderProxyInstaller picks another
+   file. It is cached on the host with the microservice installers, copied to
+   C:\DVMSSetup\RecorderProxy and run silently:
+     <installer>.exe /install /quiet /norestart /log RecorderProxy-install.log
+   (an .msi runs with msiexec /i /qn /norestart /l*v). Its logs go to
+   "<destination>\Install logs\RecorderProxy", and Windows restarts when it
+   returns 3010.
+7. Confirms a DVMS product and a Recorder Proxy product are registered, D: is
+   present, every MSI_CHECK file from install.cmd exists and the license file
+   is still there, and warns about VMS* Windows services that are not running.
+   The recorder, watchdog and system management services are delayed-start,
+   so it first waits until Windows has been up for 5 minutes while any are
+   stopped. The VM is left running.
 
 The microservice order, MSI properties and keys all come from install.cmd on the
 share, so changes to it on main are picked up without changing this script. A
@@ -55,15 +70,17 @@ PARAMETERS (all optional; supplying one skips its question)
   -Name, -Destination, -ComputerName, -Version, -Installer (file name),
   -LicensePath, -TemplateName, -CheckpointName, -BuildRoot, -LegacyRepository,
   -InstallerArguments, -InstallTimeoutMinutes (default 120),
-  -ServicesTimeoutMinutes (default 60), -StorageSizeGB (default 200), -NoPause
+  -ServicesTimeoutMinutes (default 60, also used for the recorder proxy),
+  -StorageSizeGB (default 200), -RecorderProxyInstaller (a full path),
+  -NoRecorderProxy (skip it), -NoPause
 Example:
   .\New-VM-DVMS-v10.ps1 -Name 'DVMS v10' -ComputerName 'DVMS-V10' -Version main -LicensePath D:\License.lic
 
 REQUIREMENTS
 - Everything ..\VM-DVMS\README.txt lists; this script uses its DVMS-License.ps1
   and DVMS-Build.ps1.
-- About 2.7 GB more free space on the cache drive for the microservice
-  installers, and twice that plus 5 GB more on the VM drive.
+- About 2.7 GB more free space on the cache drive for the microservice and
+  recorder proxy installers, and twice that plus 5 GB more on the VM drive.
 
 FAILURES
 Nothing is deleted on failure. The VM, its files, the host license copy, the

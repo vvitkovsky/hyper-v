@@ -2,7 +2,8 @@
 #Requires -PSEdition Desktop
 # Creates a VM from the maintained template, binds a DVMS license to its MAC
 # address, installs the microservices of a DVMS v10 build with its
-# scripts\install.cmd and then the DVMS build itself, silently.
+# scripts\install.cmd, the DVMS build itself and then the recorder proxy
+# service from <BuildRoot>\VmsRecorderProxyService, silently.
 [CmdletBinding()]
 param(
     [string]$Name,
@@ -19,6 +20,9 @@ param(
     [int]$InstallTimeoutMinutes = 120,
     [int]$ServicesTimeoutMinutes = 60,
     [ValidateRange(1,65536)][int]$StorageSizeGB = 200,
+    # A specific recorder proxy installer instead of the newest one on the share.
+    [string]$RecorderProxyInstaller,
+    [switch]$NoRecorderProxy,
     [switch]$NoPause
 )
 $ErrorActionPreference='Stop'
@@ -27,6 +31,10 @@ if (-not $isAdmin) {
     $command="& '"+$PSCommandPath.Replace("'","''")+"'"
     foreach ($parameter in $PSBoundParameters.Keys) {
         if ($parameter -eq 'NoPause') { continue }
+        if ($PSBoundParameters[$parameter] -is [switch]) {
+            if ($PSBoundParameters[$parameter]) { $command+=" -$parameter" }
+            continue
+        }
         $value=[string]$PSBoundParameters[$parameter]
         $command+=" -$parameter '"+$value.Replace("'","''")+"'"
     }
@@ -121,6 +129,9 @@ try {
     }
     $services=Read-DVMSServicesScript -Path (Get-DVMSServicesScriptPath $BuildRoot $Version)
     if (-not $services.SignalsRestart) { Write-Warning "install.cmd no longer prints '$($services.RestartMarker)', so a restart it needs would not be noticed." }
+    $proxy=$null
+    if ($RecorderProxyInstaller) { $proxy=Get-Item -LiteralPath $RecorderProxyInstaller }
+    elseif (-not $NoRecorderProxy) { $proxy=Get-DVMSRecorderProxyInstaller -Root (Join-Path $BuildRoot 'VmsRecorderProxyService') -Version $Version }
 
     if ([string]::IsNullOrWhiteSpace($LicensePath)) {
         # The license used for VM-DVMS works here too.
@@ -146,7 +157,8 @@ try {
     $needed=@{}
     $vmDrive=[IO.Path]::GetPathRoot([IO.Path]::GetFullPath($settings.Destination))
     # install.cmd copies each file once more in the VM before installing it.
-    $needed[$vmDrive]=$templateBytes+$selected.Length+2*$servicesBytes+15GB
+    $proxyBytes=if ($proxy) { $proxy.Length } else { 0 }
+    $needed[$vmDrive]=$templateBytes+$selected.Length+2*$servicesBytes+$proxyBytes+15GB
     # The installer cache is shared with VM-DVMS, so either script can reuse it.
     $cacheDirectory=Join-Path (Join-Path $dvms '.cache') $Version
     $servicesCache=Join-Path (Join-Path $PSScriptRoot '.cache') 'services'
@@ -159,6 +171,7 @@ try {
     foreach ($file in $services.Files) {
         if (-not (Test-DVMSServiceFileCached $file $servicesCache)) { $needed[$servicesCacheDrive]=[long]$needed[$servicesCacheDrive]+$file.Length }
     }
+    if ($proxy -and -not (Test-DVMSServiceFileCached $proxy $servicesCache)) { $needed[$servicesCacheDrive]=[long]$needed[$servicesCacheDrive]+$proxy.Length }
     foreach ($drive in $needed.Keys) {
         $free=(New-Object IO.DriveInfo $drive).AvailableFreeSpace
         if ($free -lt $needed[$drive]) { throw ("Drive {0} has {1:N1} GB free; about {2:N1} GB is needed." -f $drive,($free/1GB),($needed[$drive]/1GB)) }
@@ -171,6 +184,8 @@ try {
     Write-Host "DVMS installer: $($selected.FullName)"
     Write-Host "Storage disk:   D:, $StorageSizeGB GB, dynamically expanding"
     Write-Host ("Microservices:  {0} ({1} files, {2:N1} GB)" -f $services.Path,$services.Files.Count,($servicesBytes/1GB))
+    if ($proxy) { Write-Host ("Recorder proxy: {0} ({1:yyyy-MM-dd HH:mm})" -f $proxy.FullName,$proxy.LastWriteTime) }
+    else { Write-Host 'Recorder proxy: not installed (-NoRecorderProxy)' }
     Write-Host ("License:        {0} (product {1}, serial {2}, MACs {3})" -f $LicensePath,$license.Product,$license.SerialNumber,($license.Macs -join ', '))
     Write-Host ''
 
@@ -179,6 +194,7 @@ try {
     $cachedServices=@(foreach ($file in $services.Files) {
         [pscustomobject]@{Host=Save-DVMSServiceFile -Source $file -CacheRoot $servicesCache;Guest=ConvertTo-DVMSMirrorPath $file.FullName $guestMirror}
     })
+    $cachedProxy=if ($proxy) { Save-DVMSServiceFile -Source $proxy -CacheRoot $servicesCache } else { $null }
     $localScript=Join-Path (Join-Path (Join-Path (Join-Path $PSScriptRoot '.cache') 'scripts') $Version) 'install.cmd'
     Save-DVMSLocalServicesScript -Text $services.Text -MirrorRoot $guestMirror -Path $localScript
 
@@ -220,6 +236,13 @@ try {
     # The microservices go in first, so DVMS is installed on top of them.
     Write-Host ("Copying {0} microservice installers into the VM ({1:N1} GB)..." -f $cachedServices.Count,($servicesBytes/1GB))
     foreach ($file in $cachedServices) { Copy-ToGuest $file.Host $file.Guest }
+    $guestFolders=@($services.Folders | ForEach-Object { ConvertTo-DVMSMirrorPath $_ $guestMirror })
+    if ($guestFolders.Count) {
+        Invoke-VMGuestCommand -VMId $vm.Id -Credential $credential -Arguments @(,$guestFolders) -Script {
+            param($Folders)
+            foreach ($folder in $Folders) { New-Item -ItemType Directory -Path $folder -Force | Out-Null }
+        } | Out-Null
+    }
     Copy-ToGuest $localScript (Join-Path $guestServices 'install.cmd')
     Write-Host "Installing microservices: $guestServices\install.cmd"
     $started=Get-Date
@@ -278,11 +301,42 @@ try {
         $guest=Restart-Guest
     }
 
+    # The recorder proxy goes in last, on top of the recorder.
+    if ($proxy) {
+        $guestProxy=Join-Path $guestSetup 'RecorderProxy'
+        $guestProxyInstaller=Join-Path $guestProxy $proxy.Name
+        Write-Host ("Copying the recorder proxy installer into the VM ({0:N0} MB)..." -f ($proxy.Length/1MB))
+        Copy-ToGuest $cachedProxy $guestProxyInstaller
+        $proxyCommand=Get-DVMSRecorderProxyCommand $guestProxyInstaller (Join-Path $guestProxy 'RecorderProxy-install.log')
+        Write-Host "Installing the recorder proxy: $($proxyCommand.FilePath) $($proxyCommand.Arguments)"
+        $started=Get-Date
+        $job=Invoke-Command -VMId $vm.Id -Credential $credential -AsJob -ArgumentList $proxyCommand.FilePath,$proxyCommand.Arguments -ScriptBlock {
+            param($Path,$Arguments)
+            (Start-Process -FilePath $Path -ArgumentList $Arguments -Wait -PassThru).ExitCode
+        }
+        $proxyExit=[int](Wait-GuestInstall -Job $job -Started $started -TimeoutMinutes $ServicesTimeoutMinutes -Activity 'Recorder proxy installation')
+        Write-Host ("Recorder proxy installer exited with code {0} after {1:N0} min." -f $proxyExit,((Get-Date)-$started).TotalMinutes)
+        $hostProxyLogs=Join-Path $hostLogs 'RecorderProxy'
+        Copy-GuestLogs $guestProxy $hostProxyLogs
+        if ($proxyExit -notin @(0,3010)) { throw "Recorder proxy installation failed with exit code $proxyExit. Logs: $hostProxyLogs" }
+        Invoke-VMGuestCommand -VMId $vm.Id -Credential $credential -Arguments @($guestProxyInstaller) -Script {
+            param($Path)
+            Remove-Item -LiteralPath $Path -Force
+        } | Out-Null
+        if ($proxyExit -eq 3010) {
+            Write-Host 'The recorder proxy installer requested a restart; restarting Windows...'
+            $guest=Restart-Guest
+        }
+    }
+
     $installed=Invoke-VMGuestCommand -VMId $vm.Id -Credential $credential -Arguments @(,$services.Checks) -Script {
         param($Checks)
         $keys=@('HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*','HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*')
+        $registered=@(Get-ItemProperty $keys -ErrorAction SilentlyContinue | Where-Object { $_.PSObject.Properties['DisplayName'] -and $_.DisplayName })
         [pscustomobject]@{
-            Products=@(Get-ItemProperty $keys -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like '*DVMS*' } |
+            Products=@($registered | Where-Object { $_.DisplayName -like '*DVMS*' } |
+                ForEach-Object { "$($_.DisplayName) $($_.DisplayVersion)" } | Sort-Object -Unique)
+            RecorderProxy=@($registered | Where-Object { $_.DisplayName -like '*Recorder*Proxy*' } |
                 ForEach-Object { "$($_.DisplayName) $($_.DisplayVersion)" } | Sort-Object -Unique)
             License=Test-Path -LiteralPath (Join-Path $env:ProgramFiles 'DVMS\Licenses\License.lic')
             Storage=[bool](Get-Volume -DriveLetter D -ErrorAction SilentlyContinue | Where-Object FileSystemLabel -EQ 'Storage')
@@ -292,15 +346,34 @@ try {
     }
     if (-not $installed.Products.Count) { throw "The installer reported success, but no DVMS product is registered in the VM. Logs: $hostLogs" }
     if (-not $installed.Storage) { throw 'The Storage volume D: is missing in the VM.' }
+    if ($proxy -and -not $installed.RecorderProxy.Count) { throw "The recorder proxy installer reported success, but no Recorder Proxy product is registered in the VM. Logs: $hostProxyLogs" }
     if ($installed.MissingServices.Count) { throw "install.cmd reported success, but these files are missing: $($installed.MissingServices -join ', '). Logs: $hostServiceLogs" }
     if (-not $installed.License) { Write-Warning 'C:\Program Files\DVMS\Licenses\License.lic is missing after installation.' }
-    $stopped=@($installed.Services | Where-Object Status -NE 'Running')
+    # The recorder, watchdog and system management services are delayed-start,
+    # so Windows starts them about two minutes after the last restart.
+    $vmsServices=$installed.Services
+    $stopped=@($vmsServices | Where-Object Status -NE 'Running')
+    if ($stopped.Count) {
+        for ($wait=0; $wait -lt 20; $wait++) {
+            $current=Invoke-VMGuestCommand -VMId $vm.Id -Credential $credential -Script {
+                [pscustomobject]@{
+                    Uptime=((Get-Date)-(Get-CimInstance Win32_OperatingSystem).LastBootUpTime).TotalSeconds
+                    Services=@(Get-Service -Name 'VMS*' -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { [pscustomobject]@{Name=$_.Name;Status=[string]$_.Status} })
+                }
+            }
+            $vmsServices=$current.Services
+            $stopped=@($vmsServices | Where-Object Status -NE 'Running')
+            if (-not $stopped.Count -or $current.Uptime -gt 300) { break }
+            if (-not $wait) { Write-Host 'Waiting for delayed-start services...' }
+            Start-Sleep -Seconds 15
+        }
+    }
     if ($stopped.Count) { Write-Warning ("Services not running: {0}" -f (($stopped | ForEach-Object { "$($_.Name) ($($_.Status))" }) -join ', ')) }
 
     Write-Host ''
     Write-Host "DVMS v10 VM ready: $($settings.Name) (computer name $($settings.ComputerName), MAC $mac)." -ForegroundColor Green
-    foreach ($product in $installed.Products) { Write-Host "  Installed: $product" }
-    Write-Host ("  Microservices: {0} packages installed from {1}; {2} of {3} VMS* services running." -f $services.Files.Count,$services.Path,($installed.Services.Count-$stopped.Count),$installed.Services.Count)
+    foreach ($product in @($installed.Products)+@($installed.RecorderProxy)) { Write-Host "  Installed: $product" }
+    Write-Host ("  Microservices: {0} packages installed from {1}; {2} of {3} VMS* services running." -f $services.Files.Count,$services.Path,($vmsServices.Count-$stopped.Count),$vmsServices.Count)
     Write-Host "  License: C:\Program Files\DVMS\Licenses\License.lic (host copy: $hostLicense)"
     Write-Host "  Storage: D: ($StorageSizeGB GB, Virtual Hard Disks\Storage.vhdx)"
     Write-Host "  Installer logs: $hostLogs"
