@@ -1,3 +1,32 @@
+One-call creation, DVMS v10 and the VMS account (vm-use skill) - 2026-11-23.
+
+- New-TestVM.ps1 checks, names, creates, starts, signs in and arms parking in
+  one elevated run. -Plan against the real host: default names, a ticket key,
+  DVMS9 and DVMS10 defaults, and refusals for a bad ticket key, an unknown
+  template and a missing license.
+- Live, clean: 'Windows 11 Test MS-2' from Windows 11 Template in 197 s,
+  signed in on the console as dvr with the desktop showing. This is the first
+  console sign-in on a Windows 11 copy.
+- Live, DVMS10 from Windows Server 2025 Template with main: the first run
+  installed everything from the media disk (34 files, 6.2 GB, built and
+  mounted in 23 s; 31 microservices in 5 min) and then failed its final
+  check, because main is now "Mirasys VMS Server" in
+  C:\Program Files\Mirasys VMS and reads its license only there (legacy
+  MS-9556). New-VM-DVMS-v10 now writes the license to both Licenses folders
+  and accepts either product name. The second run passed in 917 s: Mirasys
+  VMS Server and the recorder proxy registered, 35 of 35 VMS* services
+  running 13 s after the last installer, signed in on the console.
+- The stopped automatic services were started by the script rather than
+  waited for; the run did not show whether Windows would have started them
+  later anyway.
+- VMS application account: Save/Read-DVMSAppCredential checked with a dummy
+  account in a scratch folder (password not in clear, reads back, folder
+  restricted to SYSTEM and Administrators, empty password refused).
+  Send-VMUseKey with -Hold and Send-VMUseText opened Notepad through Win+R on
+  the Windows 11 copy's console. A single Windows-key tap did not open Start.
+- Not run: DVMS9 through New-TestVM.ps1, signing in to a VMS application (no
+  account was saved), and whether one account fits both v9 and v10.
+
 Console sign-in (vm-use skill) - 2026-11-23.
 
 - Connect-VMUseConsole signs the saved credential's account in on the VM's

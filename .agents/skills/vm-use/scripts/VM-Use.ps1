@@ -284,3 +284,44 @@ function Connect-VMUseConsole {
     if (-not $user) { throw "Nobody is signed in on the console of '$($VM.Name)' as '$account'. Look at its screen and the guest's Security log (event 4625)." }
     $user
 }
+
+# ---- VMS applications --------------------------------------------------------
+
+function Get-VMUseAppCredential {
+    # The account for signing in to the VMS applications installed in a test
+    # VM (Spotter, System Manager, the web clients): the installer's default
+    # administrator, saved once by the user with VM-DVMS\Set-VMSCredential.cmd.
+    # It is not the Windows account; that one comes from Get-VMUseCredential.
+    . (Join-Path $VMUseRepository 'VM-DVMS\DVMS-Credential.ps1')
+    Read-DVMSAppCredential
+}
+
+function Send-VMUseText {
+    # Types text on the VM's virtual keyboard, into whatever has the focus on
+    # its console. Use it for a user name or a password, so the secret is
+    # never part of a command line or of the output.
+    param([Parameter(Mandatory=$true)]$VM,[Parameter(Mandatory=$true)][AllowEmptyString()][string]$Text)
+    if ($Text -match '[^\x20-\x7E]') { throw 'The text has characters the virtual keyboard cannot type.' }
+    $keyboard=Get-CimInstance -Namespace 'root\virtualization\v2' -ClassName Msvm_Keyboard | Where-Object SystemName -EQ ([guid]$VM.Id).ToString()
+    if (-not $keyboard) { throw "VM '$($VM.Name)' has no virtual keyboard; is it running?" }
+    if ($Text) { $null=Invoke-CimMethod -InputObject $keyboard -MethodName TypeText -Arguments @{asciiText=$Text} }
+}
+
+function Send-VMUseKey {
+    # Presses one key on the VM's virtual keyboard by its virtual-key code:
+    # 13 Enter, 9 Tab, 27 Escape. -Hold keeps modifier keys down meanwhile:
+    # 0x5B Windows, 0x11 Ctrl, 0x12 Alt, 0x10 Shift. Win+R, which opens the
+    # Run box, is -KeyCode 0x52 -Hold 0x5B.
+    param([Parameter(Mandatory=$true)]$VM,[Parameter(Mandatory=$true)][uint32]$KeyCode,[uint32[]]$Hold=@())
+    $keyboard=Get-CimInstance -Namespace 'root\virtualization\v2' -ClassName Msvm_Keyboard | Where-Object SystemName -EQ ([guid]$VM.Id).ToString()
+    if (-not $keyboard) { throw "VM '$($VM.Name)' has no virtual keyboard; is it running?" }
+    $pressed=@()
+    try {
+        foreach ($code in $Hold) { $null=Invoke-CimMethod -InputObject $keyboard -MethodName PressKey -Arguments @{keyCode=$code}; $pressed+=$code }
+        $null=Invoke-CimMethod -InputObject $keyboard -MethodName TypeKey -Arguments @{keyCode=$KeyCode}
+    } finally {
+        # A modifier left down would garble everything typed afterwards.
+        [array]::Reverse($pressed)
+        foreach ($code in $pressed) { $null=Invoke-CimMethod -InputObject $keyboard -MethodName ReleaseKey -Arguments @{keyCode=$code} }
+    }
+}

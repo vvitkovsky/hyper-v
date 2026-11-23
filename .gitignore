@@ -430,6 +430,8 @@ FodyWeavers.xsd
 /VM-NightlyUpdate/.state/
 # Cached DVMS installers and license files
 /VM-DVMS/.cache/
+# The VMS application account for test VMs, encrypted
+/VM-DVMS/.state/
 /VM-DVMS/License*.lic
 /VM-DVMS-v10/.cache/
 /VM-DVMS-v10/License*.lic

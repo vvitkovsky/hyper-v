@@ -24,8 +24,11 @@ the default is ..\VM-DVMS\License.lic.
 WHAT IT DOES
 1. Steps 1-7 of ..\VM-DVMS\README.txt: checks, license decode, installer cache,
    template copy and rename with the D: storage disk, static MAC, license
-   re-signed for it and written to C:\Program Files\DVMS\Licenses\License.lic
-   in the VM. The DVMS installer is
+   re-signed for it and written into the VM. v10 installs into
+   C:\Program Files\Mirasys VMS and reads its license only from the Licenses
+   folder there; builds from before that change use C:\Program Files\DVMS. The
+   license is written to both, so either kind of build finds it. The DVMS
+   installer is
    cached in ..\VM-DVMS\.cache\<version>\, shared with New-VM-DVMS.cmd.
 2. Before the VM is created, reads install.cmd on the host and resolves every
    share path it copies from (set MSI_SOURCE=\\rdfileserver\...,
@@ -59,7 +62,8 @@ WHAT IT DOES
    (an .msi runs with msiexec /i /qn /norestart /l*v). Its logs go to
    "<destination>\Install logs\RecorderProxy", and Windows restarts when it
    returns 3010. The install media disk is then detached and deleted.
-7. Confirms a DVMS product and a Recorder Proxy product are registered, D: is
+7. Confirms the server product ("Mirasys VMS Server", or a DVMS product for
+   older builds) and a Recorder Proxy product are registered, D: is
    present, every MSI_CHECK file from install.cmd exists and the license file
    is still there, and warns about VMS* Windows services that are not running.
    The recorder, watchdog and system management services are delayed-start,

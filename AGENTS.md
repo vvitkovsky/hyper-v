@@ -34,5 +34,5 @@ nothing is copied anywhere else.
 - When behaviour changes, update the folder's `README.txt`, `README.md` and
   the `vm-use` skill in the same change, and add a dated entry to
   `VM-NightlyUpdate/Validation.txt` saying what was checked and what was not.
-- Generated files stay out of git: `VM-NightlyUpdate/.state/`, the `.cache/`
-  folders and `License*.lic`.
+- Generated files stay out of git: the `.state/` and `.cache/` folders and
+  `License*.lic`.

@@ -82,9 +82,20 @@ REQUIREMENTS
   10 GB, and on the cache drive for the installer. The storage disk starts
   small and grows on the VM drive as recordings are written, up to its size.
 
+VMS APPLICATION ACCOUNT FOR TEST VMS
+Run Set-VMSCredential.cmd once and enter the account that the VMS applications
+of a fresh installation are signed in to with (the installer's default
+administrator). One account serves every test VM. It is saved to
+.state\vms-app-credential.json with the password encrypted (machine DPAPI) in a
+folder only SYSTEM and administrators can read, like the templates' guest
+credentials. Agents read it with Get-VMUseAppCredential of the vm-use skill to
+sign in to Spotter, System Manager and the other applications in a test VM.
+Set-VMSCredential.cmd -Show prints the saved user name, never the password.
+Run it again to change the account.
+
 FAILURES
 Nothing is deleted on failure. The VM, its files, the host license copy and any
 installer logs are kept for inspection, and the VM is left as it is. After a
 failed installation the install media disk is still attached and mounted.
 
-License*.lic files and .cache are excluded from git.
+License*.lic files, .cache and .state are excluded from git.

@@ -50,6 +50,8 @@ $guestServices=Join-Path $guestSetup 'Services'
 # The installers are not copied into Windows: they sit on a disk of their own
 # that is mounted as this folder for the installation (DVMS-Media.ps1).
 $guestMedia=Join-Path $guestSetup 'Media'
+# Program Files folders of v10 builds, the current one first.
+$guestLicenseFolders=@('Mirasys VMS','DVMS')
 $guestMirror=Join-Path $guestMedia 'Sources'
 $exitCode=1
 try {
@@ -219,13 +221,18 @@ try {
     Write-Host "Starting '$($vm.Name)'..."
     Start-VM -VM $vm
     $guest=Wait-VMGuest -VMId $vm.Id -Credential $credential -Deadline (Get-Date).AddMinutes(15)
-    Invoke-VMGuestCommand -VMId $vm.Id -Credential $credential -Arguments @($signed.Code) -Script {
-        param($Code)
-        $folder=Join-Path $env:ProgramFiles 'DVMS\Licenses'
-        New-Item -ItemType Directory -Path $folder -Force | Out-Null
-        [IO.File]::WriteAllText((Join-Path $folder 'License.lic'),$Code,(New-Object Text.UTF8Encoding($false)))
+    # v10 installs into "Mirasys VMS" and reads its license only there; builds
+    # from before that change use "DVMS". The license goes into both, so
+    # either kind of build finds it.
+    Invoke-VMGuestCommand -VMId $vm.Id -Credential $credential -Arguments @($signed.Code,$guestLicenseFolders) -Script {
+        param($Code,$Folders)
+        foreach ($name in $Folders) {
+            $folder=Join-Path $env:ProgramFiles (Join-Path $name 'Licenses')
+            New-Item -ItemType Directory -Path $folder -Force | Out-Null
+            [IO.File]::WriteAllText((Join-Path $folder 'License.lic'),$Code,(New-Object Text.UTF8Encoding($false)))
+        }
     } | Out-Null
-    Write-Host 'License copied to C:\Program Files\DVMS\Licenses\License.lic in the VM.'
+    Write-Host ("License copied into the VM: {0}." -f (($guestLicenseFolders | ForEach-Object { "C:\Program Files\$_\Licenses\License.lic" }) -join ' and '))
 
     $hostLogs=Join-Path $settings.Destination 'Install logs'
 
@@ -328,26 +335,27 @@ try {
     # Everything is installed; the media disk leaves the VM again.
     Dismount-DVMSMediaDisk -VM $vm -Credential $credential -Path $media -GuestPath $guestMedia
 
-    $installed=Invoke-VMGuestCommand -VMId $vm.Id -Credential $credential -Arguments @(,$services.Checks) -Script {
-        param($Checks)
+    $installed=Invoke-VMGuestCommand -VMId $vm.Id -Credential $credential -Arguments @($services.Checks,$guestLicenseFolders) -Script {
+        param($Checks,$LicenseFolders)
         $keys=@('HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*','HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*')
         $registered=@(Get-ItemProperty $keys -ErrorAction SilentlyContinue | Where-Object { $_.PSObject.Properties['DisplayName'] -and $_.DisplayName })
         [pscustomobject]@{
-            Products=@($registered | Where-Object { $_.DisplayName -like '*DVMS*' } |
+            # The server bundle is "Mirasys VMS Server"; older v10 builds were "DVMS".
+            Products=@($registered | Where-Object { $_.DisplayName -like 'Mirasys VMS Server*' -or $_.DisplayName -like '*DVMS*' } |
                 ForEach-Object { "$($_.DisplayName) $($_.DisplayVersion)" } | Sort-Object -Unique)
             RecorderProxy=@($registered | Where-Object { $_.DisplayName -like '*Recorder*Proxy*' } |
                 ForEach-Object { "$($_.DisplayName) $($_.DisplayVersion)" } | Sort-Object -Unique)
-            License=Test-Path -LiteralPath (Join-Path $env:ProgramFiles 'DVMS\Licenses\License.lic')
+            License=@($LicenseFolders | ForEach-Object { Join-Path $env:ProgramFiles (Join-Path $_ 'Licenses\License.lic') } | Where-Object { Test-Path -LiteralPath $_ })
             Storage=[bool](Get-Volume -DriveLetter D -ErrorAction SilentlyContinue | Where-Object FileSystemLabel -EQ 'Storage')
             MissingServices=@($Checks | Where-Object { -not (Test-Path -LiteralPath $_) })
             Services=@(Get-Service -Name 'VMS*' -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { [pscustomobject]@{Name=$_.Name;Status=[string]$_.Status} })
         }
     }
-    if (-not $installed.Products.Count) { throw "The installer reported success, but no DVMS product is registered in the VM. Logs: $hostLogs" }
+    if (-not $installed.Products.Count) { throw "The installer reported success, but neither 'Mirasys VMS Server' nor a DVMS product is registered in the VM. Logs: $hostLogs" }
     if (-not $installed.Storage) { throw 'The Storage volume D: is missing in the VM.' }
     if ($proxy -and -not $installed.RecorderProxy.Count) { throw "The recorder proxy installer reported success, but no Recorder Proxy product is registered in the VM. Logs: $hostProxyLogs" }
     if ($installed.MissingServices.Count) { throw "install.cmd reported success, but these files are missing: $($installed.MissingServices -join ', '). Logs: $hostServiceLogs" }
-    if (-not $installed.License) { Write-Warning 'C:\Program Files\DVMS\Licenses\License.lic is missing after installation.' }
+    if (-not @($installed.License).Count) { Write-Warning 'License.lic is missing from the Licenses folders after installation.' }
     # The recorder, watchdog and system management services are delayed-start:
     # Windows starts them about two minutes after the last restart. They are
     # started here instead of waited for; one that will not start yet is left
@@ -360,7 +368,7 @@ try {
                 param($StartStopped)
                 if ($StartStopped) {
                     Get-Service -Name 'VMS*' -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq 'Stopped' -and $_.StartType -eq 'Automatic' } |
-                        ForEach-Object { try { Start-Service -InputObject $_ -ErrorAction Stop } catch { } }
+                        ForEach-Object { try { Start-Service -InputObject $_ -ErrorAction Stop -WarningAction SilentlyContinue } catch { } }
                 }
                 [pscustomobject]@{
                     Uptime=((Get-Date)-(Get-CimInstance Win32_OperatingSystem).LastBootUpTime).TotalSeconds
@@ -380,7 +388,7 @@ try {
     Write-Host "DVMS v10 VM ready: $($settings.Name) (computer name $($settings.ComputerName), MAC $mac)." -ForegroundColor Green
     foreach ($product in @($installed.Products)+@($installed.RecorderProxy)) { Write-Host "  Installed: $product" }
     Write-Host ("  Microservices: {0} packages installed from {1}; {2} of {3} VMS* services running." -f $services.Files.Count,$services.Path,($vmsServices.Count-$stopped.Count),$vmsServices.Count)
-    Write-Host "  License: C:\Program Files\DVMS\Licenses\License.lic (host copy: $hostLicense)"
+    Write-Host "  License: $(@($installed.License) -join ', ') (host copy: $hostLicense)"
     Write-Host "  Storage: D: ($StorageSizeGB GB, Virtual Hard Disks\Storage.vhdx)"
     Write-Host "  Installer logs: $hostLogs"
     Write-Host "  The VM is running. Checkpoint '$CheckpointName' is the renamed Windows state before DVMS was installed."

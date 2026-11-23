@@ -44,7 +44,8 @@ VM-NightlyUpdate nightly tasks ─► a template VM   (Windows 11 Template, Wind
   Every creation script asks which template to copy (Enter picks
   `Windows 11 Template`); `-TemplateName` skips the question.
 - **DVMS copies** also get a static MAC address and a DVMS license re-signed
-  for that address, which is written to `C:\Program Files\DVMS\Licenses`
+  for that address, which is written to `C:\Program Files\DVMS\Licenses` (for
+  v10 also to `C:\Program Files\Mirasys VMS\Licenses`, where v10 reads it)
   before the selected build is installed silently, and a second, dynamically
   expanding disk formatted as `D:` (`Storage`) for recordings. The installer
   reaches the VM on an install media disk that is attached for the
@@ -80,6 +81,12 @@ AI agents create, use and delete these VMs with the `vm-use` skill in
 scripts without their questions. [`AGENTS.md`](AGENTS.md), which `CLAUDE.md`
 imports, lists the skills for every agent working in this repository.
 
+Its `scripts/New-TestVM.ps1` creates a VM in one elevated run: it checks the
+template, name, folder and space, works out the names (with a Jira ticket key
+when given) and, for DVMS, the build, installer and license, runs the matching
+creation script, then starts the VM, signs in on its console and arms parking.
+`-Plan` prints what it would create and changes nothing.
+
 The skill also parks a test VM that has not been used for 10 minutes: a
 one-time scheduled task (`VMUsePark-<VM ID>`, running as SYSTEM) saves its
 state, which frees the host's memory, and the next use resumes it.
@@ -107,7 +114,9 @@ pending parking.
   or renaming it. Switching to a branch without these scripts makes the next
   nightly run fail.
 - Generated files stay out of git: `VM-NightlyUpdate/.state/` (credentials,
-  config, logs), `VM-DVMS/.cache/` and `VM-DVMS-v10/.cache/` (cached
-  installers) and `License*.lic` in both DVMS folders.
+  config, logs), `VM-DVMS/.state/` (the VMS application account for test VMs,
+  saved with `VM-DVMS\Set-VMSCredential.cmd`), `VM-DVMS/.cache/` and
+  `VM-DVMS-v10/.cache/` (cached installers) and `License*.lic` in both DVMS
+  folders.
 - Nothing is deleted when a step fails. VMs, files and logs are left for
   inspection.
