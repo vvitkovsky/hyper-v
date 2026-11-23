@@ -1,3 +1,19 @@
+Console sign-in (vm-use skill) - 2026-11-23.
+
+- Connect-VMUseConsole signs the saved credential's account in on the VM's
+  console through the Msvm_Keyboard virtual keyboard. The sign-in screen
+  preselects the last console user, which on copies of Windows Server 2025
+  Template is Administrator while the credential is dvr; the first version
+  therefore typed into the wrong account (Security event 4625, 0xc000006a).
+  It now sets the LogonUI LastLoggedOn* and SelectedUserSID values to the
+  credential's account and restarts the sign-in screen when it showed another.
+- Live on a clean copy of Windows Server 2025 Template: signed in as dvr in
+  13 s, quser showed an active console session 1 with explorer running; a
+  second call returned at once. The screen then showed Windows' first sign-in
+  privacy page, since dvr had never signed in on the template's console.
+- Not run: a Windows 11 copy, and a VM whose sign-in screen already shows
+  the right account.
+
 Faster VM creation - 2026-11-23.
 
 - Renaming a copy polls the guest every 3 seconds instead of 10, and its
@@ -34,7 +50,15 @@ Faster VM creation - 2026-11-23.
   with 0x800f0993 PSFX_E_REBASE_HYDRATION_CANDIDATES_MISSING: the base files
   of 28 components (Hyper-V, TPM, NFS, ProjFS and others) cannot be rebuilt
   from the component store, which is marked corrupt. Its last successful run,
-  with DISM /ResetBase, was on 2026-11-10. Not repaired.
+  with DISM /ResetBase, was on 2026-11-10.
+- Repaired the same day: DISM /Online /Cleanup-Image /RestoreHealth inside
+  the template took 71 minutes on the hard disk and ended successfully;
+  CheckHealth then found no corruption. The next maintenance run installed
+  KB5132061, and the one after it (17 minutes, template on an NVMe drive)
+  installed the remaining updates, cleaned up and refreshed 'clean'. Whether
+  /ResetBase caused the damage is not established.
+- Both templates were moved from D:\VM (hard disk) to C:\VMs (NVMe) with
+  Move-VMStorage and their tasks re-registered with Install.ps1.
 
 Parking unused test VMs (vm-use skill) - 2026-11-23.
 

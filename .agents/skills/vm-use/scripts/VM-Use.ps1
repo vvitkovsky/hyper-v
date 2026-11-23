@@ -215,3 +215,72 @@ function Start-VMUseVM {
     }
     Get-VM -Id $current.Id
 }
+
+# ---- Console sign-in --------------------------------------------------------
+
+function Connect-VMUseConsole {
+    # Signs in to Windows on the VM's console: the desktop that Hyper-V's
+    # basic session mode shows, that screenshots and recordings capture and
+    # that programs with a window need. PowerShell Direct alone signs nobody
+    # in there. The sign-in screen preselects the last user who signed in on
+    # the console, so the credential's account is selected first; then its
+    # password is typed on the VM's virtual keyboard.
+    # Returns the user signed in on the console.
+    param([Parameter(Mandatory=$true)]$VM,[Parameter(Mandatory=$true)][Management.Automation.PSCredential]$Credential,[int]$TimeoutSeconds=120)
+    $consoleUser={ (Get-CimInstance Win32_ComputerSystem).UserName }
+    $user=Invoke-VMGuestCommand -VMId $VM.Id -Credential $Credential -Script $consoleUser
+    if ($user) { return $user }
+    $password=$Credential.GetNetworkCredential().Password
+    if ($password -match '[^\x20-\x7E]') { throw 'The password has characters the virtual keyboard cannot type; sign in on the console by hand.' }
+    $account=($Credential.UserName -split '\\')[-1]
+    $keyboard=Get-CimInstance -Namespace 'root\virtualization\v2' -ClassName Msvm_Keyboard | Where-Object SystemName -EQ ([guid]$VM.Id).ToString()
+    if (-not $keyboard) { throw "VM '$($VM.Name)' has no virtual keyboard; is it running?" }
+    # Preselect the account on the sign-in screen. Its values are read when the
+    # sign-in screen starts, so a screen already showing another account is
+    # restarted; Windows brings it back on Ctrl+Alt+Del.
+    $restarted=Invoke-VMGuestCommand -VMId $VM.Id -Credential $Credential -Arguments @($account) -Script {
+        param($Account)
+        $ErrorActionPreference='Stop'
+        $local=Get-LocalUser -Name $Account
+        $key='HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\LogonUI'
+        $current=Get-ItemProperty -Path $key -ErrorAction SilentlyContinue
+        $wanted=[ordered]@{
+            LastLoggedOnUser=".\$Account"; LastLoggedOnSAMUser=".\$Account"
+            LastLoggedOnDisplayName=$(if ($local.FullName) { $local.FullName } else { $Account })
+            LastLoggedOnUserSID=$local.SID.Value; SelectedUserSID=$local.SID.Value
+        }
+        $changed=$false
+        foreach ($name in $wanted.Keys) {
+            if ($current.$name -ne $wanted[$name]) { Set-ItemProperty -Path $key -Name $name -Value $wanted[$name]; $changed=$true }
+        }
+        $screen=Get-Process -Name LogonUI -ErrorAction SilentlyContinue
+        if ($changed -and $screen) { $screen | Stop-Process -Force; $true } else { $false }
+    }
+    if ($restarted) { Start-Sleep -Seconds 3 }
+    try {
+        $deadline=(Get-Date).AddSeconds($TimeoutSeconds)
+        $attempt=0
+        do {
+            $attempt++
+            # Ctrl+Alt+Del brings up the password box on every Windows version
+            # and restarts the sign-in screen when it was closed above.
+            $null=Invoke-CimMethod -InputObject $keyboard -MethodName TypeCtrlAltDel
+            Start-Sleep -Seconds 4
+            if (-not (Invoke-VMGuestCommand -VMId $VM.Id -Credential $Credential -Script { [bool](Get-Process -Name LogonUI -ErrorAction SilentlyContinue) })) { Start-Sleep -Seconds 2; continue }
+            $null=Invoke-CimMethod -InputObject $keyboard -MethodName TypeText -Arguments @{asciiText=$password}
+            Start-Sleep -Milliseconds 500
+            $null=Invoke-CimMethod -InputObject $keyboard -MethodName TypeKey -Arguments @{keyCode=[uint32]13}
+            $until=(Get-Date).AddSeconds(45)
+            do {
+                Start-Sleep -Seconds 3
+                $user=Invoke-VMGuestCommand -VMId $VM.Id -Credential $Credential -Script $consoleUser
+            } until ($user -or (Get-Date) -ge $until)
+            if ($user) { break }
+            # A rejected password leaves a message with an OK button; Enter closes it.
+            $null=Invoke-CimMethod -InputObject $keyboard -MethodName TypeKey -Arguments @{keyCode=[uint32]13}
+            Start-Sleep -Seconds 2
+        } while ($attempt -lt 2 -and (Get-Date) -lt $deadline)
+    } finally { $password=$null }
+    if (-not $user) { throw "Nobody is signed in on the console of '$($VM.Name)' as '$account'. Look at its screen and the guest's Security log (event 4625)." }
+    $user
+}

@@ -45,7 +45,13 @@ Template. Run Install.cmd for each: it sets up the nightly update and saves
 the guest credential that copies are renamed with. Each has its own permanent
 folder, with only Hyper-V's normal Virtual Machines, Virtual Hard Disks and
 Snapshots subfolders. Copying reads the whole template, so keep the folders
-on fast storage. A template stays registered and off between nightly
+on fast storage.
+
+Sign in once on each template's console with the account of that saved
+credential, answer Windows' first sign-in pages (privacy settings), then shut
+it down. Copies take the template's state, so their console sign-in, which
+the vm-use skill performs, then goes straight to the desktop instead of
+stopping at those pages. Do it while no maintenance is running. A template stays registered and off between nightly
 runs. Keep automatic host-start and automatic checkpoints disabled on it.
 
 Nightly maintenance updates each template at its own time, performs cleanup,

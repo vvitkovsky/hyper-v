@@ -18,11 +18,13 @@ the templates this host has; never assume the list.
 | DVMS v10 | `VM-DVMS-v10\New-VM-DVMS-v10.ps1` | As v9, plus the microservices from the build's `scripts\install.cmd` and the recorder proxy. Left **Running**. |
 
 Create exactly the kind that was asked for, and nothing more. The default is a
-clean VM: DVMS is installed only when the user asks for a VM with DVMS (VMS) in
-it. A request to prepare, create or set up a VM is finished when the VM
-exists: report it and stop. Do not go on to install DVMS, one of its
-components (recorder proxy, a microservice, a client) or a build from a ticket
-in it, even when the task around the request is about such an installer.
+clean VM: DVMS goes in only when the user asks for a VM with DVMS (VMS) in it.
+A request to prepare, create or set up a VM is finished when the VM exists:
+report it and stop. Installing anything in a VM, or running an installer there
+(DVMS, one of its components, a build from a ticket), needs the user's request
+for that installation, even when the task is about such an installer; "check",
+"look at" or "review" is not one. When the task seems to need it, say what you
+would install and run, how long it takes and what it changes, and wait.
 
 Every copy has a checkpoint named like the template's (normally `clean`):
 Windows with the new computer name, and for DVMS copies the empty `D:` drive,
@@ -68,8 +70,8 @@ that approval if needed: a sandboxed process cannot raise the UAC prompt or
 reach Hyper-V. The checks marked as needing no elevation only read files and
 the build share.
 
-Creation runs for a long time: a clean copy takes several minutes, the DVMS
-variants much longer (the scripts allow the installer up to 120 minutes). Start
+Creation takes time: a clean copy a few minutes, the DVMS variants longer
+(the scripts allow the installer up to 120 minutes). Start
 the wrapper as a background command when your shell tool has a time limit,
 never start a second copy of a run that is still going, and read the log file
 for progress.
@@ -84,15 +86,12 @@ This read-only overview lists the templates (name, state, checkpoint, size,
 whether each is ready to copy), every other VM with its folder and
 checkpoints, and free disk space and host memory.
 
-The template list is every VM with `Template` in its name, plus any VM that
-has nightly updates installed under another name. A template is ready when it
-is Off, has exactly one checkpoint with the listed name and has a saved guest
-credential, which `VM-NightlyUpdate\Install.cmd` stores when it sets up the
-nightly update. A VM that is only named as a template is listed as not ready
-until the user has run `Install.cmd` for it. When a template is not ready,
-tell the user why and stop. Never start, stop, change or restore a template
-yourself, and do not create VMs while its nightly update is running (the
-overview shows the time).
+A template is ready when it is Off, has exactly one checkpoint with the listed
+name and has a saved guest credential, which `VM-NightlyUpdate\Install.cmd`
+stores when it sets up the nightly update; a VM that is only named as a
+template is listed as not ready until that has been run. When a template is
+not ready, tell the user why and stop. Do not create VMs while a template's
+nightly update is running (the overview shows the time).
 
 ## 2. Decide the parameters
 
@@ -107,8 +106,9 @@ example which of several templates or DVMS versions.
   one is not listed and several others are, ask.
 - **Name** (`-Name`): must not be used by another VM. The scripts' convention
   is the template name with `Template` replaced by `Test`, for example
-  `Windows Server 2025 Test`. Add what distinguishes this VM, for example
-  `Windows 11 Test DVMS v9.10`.
+  `Windows Server 2025 Test`. Add what distinguishes this VM: the Jira
+  ticket key when the work is for a ticket (`Windows 11 Test MS-10361`), the
+  build for DVMS (`Windows 11 Test MS-10361 v9.10`).
 - **Destination** (`-Destination`): `A:\VMs\<Name>` unless the user names
   another place. It must be an absolute local path that does not exist yet.
 - **Computer name** (`-ComputerName`): at most 15 letters, digits and hyphens,
@@ -268,6 +268,16 @@ Copy-Item -FromSession $session -Path 'C:\ProgramData\<app>\Logs\*' -Destination
 Remove-PSSession $session
 ```
 
+- PowerShell Direct does not sign anybody in on the VM's screen. For work
+  that needs the desktop (a program with a window, a screenshot, a recording,
+  or someone watching in Hyper-V's basic session), sign in on the console
+  first with `Connect-VMUseConsole -VM $vm -Credential $cred`. It selects the
+  credential's account on the sign-in screen, types the password on the VM's
+  virtual keyboard and returns the signed-in user; when someone is already
+  signed in it returns at once. If the account has never signed in on the
+  template's console, Windows shows its privacy settings page first: leave it
+  for the user, never answer it, and tell them the template needs its one-time
+  console sign-in (see `VM-NightlyUpdate\README.txt`).
 - Begin every script with `Start-VMUseVM`, whatever state the VM is in. It
   starts the VM from Off, resumes it when it is parked or paused, marks it as
   in use for as long as the script runs, and arms the parking countdown (see
@@ -283,19 +293,14 @@ Remove-PSSession $session
 - Address the VM by `$vm.Id` after resolving it, never by name again.
 - With `$ErrorActionPreference = 'Stop'` a failing step ends the script and
   the wrapper returns exit code 1.
-- Install software in a VM, or run an installer in it, only when the user
-  asked for that installation. "Check", "look at" or "review" a task is not
-  such a request. When the task seems to need one, say what you would install
-  and run, how long it takes and what it changes in the VM, and wait.
 - Do not assume the VM can reach network shares. Copy what it needs from the
   host. For large files, `Copy-VMFile -VM $vm -SourcePath <host file>
   -DestinationPath <guest path> -CreateFullPath -FileSource Host` is faster
   than a session copy.
 - Shut down with `Stop-VMUseGuest -VM $vm -Credential $cred` (it asks Windows
   to shut down and waits for Off). Do not turn a VM off forcibly.
-- Leave the VM running when your work in it is done, with parking armed, and
-  tell the user its state and when it will be parked. Bring logs and results
-  back to the host, outside the repositories, before a restore or a delete.
+- Bring logs and results back to the host, outside the repositories, before a
+  restore or a delete.
 
 ### Park a VM that is not in use
 
@@ -325,9 +330,10 @@ running. Parking needs no agent session: a one-time scheduled task per VM
 - When the user wants a VM kept running, for example for manual testing, use
   `Start-VMUseVM -VM $vm -NoPark` or cancel the parking, and say so. Do not
   re-arm it for that VM until the user says the VM is no longer needed.
-- Tell the user when a VM will be parked, and that using it again resumes it.
-  The overview shows `Saved (parked)` and pending parking times; a scheduled
-  parking writes a line to `Park.log` in the VM's folder.
+- Leave the VM running when your work in it is done, with parking armed, and
+  tell the user its state, when it will be parked and that using it again
+  resumes it. The overview shows `Saved (parked)` and pending parking times; a
+  scheduled parking writes a line to `Park.log` in the VM's folder.
 - A parked VM has a saved state. Restoring a checkpoint and deleting the VM
   both discard it. Templates are never parked.
 
@@ -375,10 +381,9 @@ refusal with `Remove-VM` or `Remove-Item`; tell the user what it said.
 ## Rules
 
 - Templates are never started, changed, restored or deleted by an agent.
-- Creating a VM needs a request for it. Deleting one, and restoring a
-  checkpoint, each need the user's explicit go for that VM.
-- DVMS, its components and builds under test go into a VM only on the user's
-  request for that installation. A clean VM stays clean until then.
+- Creating a VM and installing anything in one each need a request for it.
+  Deleting a VM, and restoring a checkpoint, each need the user's explicit go
+  for that VM.
 - Do not touch VMs the task is not about. Other people's work may be running
   in them.
 - Credentials, license content and guest passwords never go into chat, logs,
