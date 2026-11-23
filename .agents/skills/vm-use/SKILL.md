@@ -1,6 +1,6 @@
 ---
 name: vm-use
-description: Create, use and delete Hyper-V test VMs with this repository's scripts - a clean copy of any maintained template (Windows 11 or Windows Server), or a copy with DVMS v9 or DVMS v10 installed and licensed. Use when asked to create or prepare a test VM, to run something inside one, to reset it to its clean checkpoint, or to remove it.
+description: Create, use, park and delete Hyper-V test VMs with this repository's scripts - a clean copy of any maintained template (Windows 11 or Windows Server), or a copy with DVMS v9 or DVMS v10 installed and licensed. Use when asked to create or prepare a test VM, to run something inside one, to reset it to its clean checkpoint, to park or resume it, or to remove it.
 ---
 
 # Test VMs
@@ -13,9 +13,16 @@ the templates this host has; never assume the list.
 
 | Wanted | Script | Result |
 |---|---|---|
-| Clean VM | `VM-NightlyUpdate\Create-VM.ps1` | Windows with its own computer name. Left **Off**. |
+| Clean VM | `VM-NightlyUpdate\Create-VM.ps1` | Windows with its own computer name and nothing else installed. Left **Off**. |
 | DVMS v9 | `VM-DVMS\New-VM-DVMS.ps1` | As clean, plus a `D:` storage disk, a license bound to the VM's MAC address and the DVMS build installed. Left **Running**. |
 | DVMS v10 | `VM-DVMS-v10\New-VM-DVMS-v10.ps1` | As v9, plus the microservices from the build's `scripts\install.cmd` and the recorder proxy. Left **Running**. |
+
+Create exactly the kind that was asked for, and nothing more. The default is a
+clean VM: DVMS is installed only when the user asks for a VM with DVMS (VMS) in
+it. A request to prepare, create or set up a VM is finished when the VM
+exists: report it and stop. Do not go on to install DVMS, one of its
+components (recorder proxy, a microservice, a client) or a build from a ticket
+in it, even when the task around the request is about such an installer.
 
 Every copy has a checkpoint named like the template's (normally `clean`):
 Windows with the new computer name, and for DVMS copies the empty `D:` drive,
@@ -231,7 +238,9 @@ failure of the run.
   state it was left in, and for DVMS the installed products, the MAC address
   and any warnings.
 - For DVMS the folder also holds `License.lic` (the copy bound to this VM) and
-  `Install logs` (`Services` and `RecorderProxy` subfolders for v10).
+  `Install logs` (`Services` and `RecorderProxy` subfolders for v10). After a
+  failed installation it also holds `Install media.vhdx`, the disk with the
+  installers, still attached to the VM and mounted as `C:\DVMSSetup\Media`.
 - **Nothing is deleted when a run fails.** The VM, its folder and the logs
   stay for inspection, and the VM is left as it was (possibly running). Read
   the reason and the logs, and tell the user what is left behind. A second run
@@ -248,7 +257,7 @@ absolute path, and run it through the wrapper:
 $ErrorActionPreference = 'Stop'
 . 'A:\src\hyper-v\.agents\skills\vm-use\scripts\VM-Use.ps1'
 $vm = Get-VMUseVM 'Windows 11 Test'                 # exactly one VM with this name
-if ($vm.State -eq 'Off') { Start-VM -VM $vm }
+$vm = Start-VMUseVM -VM $vm                         # starts or resumes it, arms parking
 $cred = Get-VMUseCredential -VM $vm                 # waits for Windows, then signs in
 
 Invoke-Command -VMId $vm.Id -Credential $cred -ScriptBlock { Get-Service 'VMS*' }
@@ -259,6 +268,10 @@ Copy-Item -FromSession $session -Path 'C:\ProgramData\<app>\Logs\*' -Destination
 Remove-PSSession $session
 ```
 
+- Begin every script with `Start-VMUseVM`, whatever state the VM is in. It
+  starts the VM from Off, resumes it when it is parked or paused, marks it as
+  in use for as long as the script runs, and arms the parking countdown (see
+  "Park a VM that is not in use").
 - `VM-Use.ps1` also loads the repository's own helpers, among them
   `Invoke-VMGuestCommand` (a guest command with a timeout, 60 seconds by
   default) and `Wait-VMGuest` (waits for a new boot after a restart).
@@ -270,15 +283,53 @@ Remove-PSSession $session
 - Address the VM by `$vm.Id` after resolving it, never by name again.
 - With `$ErrorActionPreference = 'Stop'` a failing step ends the script and
   the wrapper returns exit code 1.
+- Install software in a VM, or run an installer in it, only when the user
+  asked for that installation. "Check", "look at" or "review" a task is not
+  such a request. When the task seems to need one, say what you would install
+  and run, how long it takes and what it changes in the VM, and wait.
 - Do not assume the VM can reach network shares. Copy what it needs from the
   host. For large files, `Copy-VMFile -VM $vm -SourcePath <host file>
   -DestinationPath <guest path> -CreateFullPath -FileSource Host` is faster
   than a session copy.
 - Shut down with `Stop-VMUseGuest -VM $vm -Credential $cred` (it asks Windows
   to shut down and waits for Off). Do not turn a VM off forcibly.
-- Leave the VM in the state the user expects and say which state that is.
-  Bring logs and results back to the host, outside the repositories, before a
-  restore or a delete.
+- Leave the VM running when your work in it is done, with parking armed, and
+  tell the user its state and when it will be parked. Bring logs and results
+  back to the host, outside the repositories, before a restore or a delete.
+
+### Park a VM that is not in use
+
+A running VM holds host memory. A test VM that nobody uses is therefore
+**parked**: its state is saved to disk, the memory is freed, and the next
+`Start-VMUseVM` resumes it exactly where it was, with its programs still
+running. Parking needs no agent session: a one-time scheduled task per VM
+(`VMUsePark-<VM ID>`, running as SYSTEM) does it.
+
+- `Start-VMUseVM` arms the countdown: the VM is parked 10 minutes later
+  (`-ParkAfterMinutes`). While a script that called `Start-VMUseVM` is still
+  running when that time comes, parking is postponed by the same interval, so
+  a long installation is never interrupted.
+- So a VM is parked at most 10 minutes after the last script that used it
+  ended. For a full 10 minutes from the end of your work, finish the script
+  with `Register-VMUsePark -VM $vm`, which restarts the countdown.
+- The creation scripts do not arm it. After creating a VM with DVMS, which is
+  left running, arm it unless you use the VM straight away:
+
+  ```powershell
+  .\.agents\skills\vm-use\scripts\Invoke-Elevated.ps1 -ScriptPath .\.agents\skills\vm-use\scripts\Park-TestVM.ps1 -Parameters @{ Name='Windows 11 Test DVMS main'; AfterMinutes=10 }
+  ```
+
+- The same script parks a VM at once (no `AfterMinutes`) and cancels pending
+  parking (`Cancel=$true`). `ShutDown=$true` shuts Windows down instead of
+  saving the state; use it when the user wants the VM off.
+- When the user wants a VM kept running, for example for manual testing, use
+  `Start-VMUseVM -VM $vm -NoPark` or cancel the parking, and say so. Do not
+  re-arm it for that VM until the user says the VM is no longer needed.
+- Tell the user when a VM will be parked, and that using it again resumes it.
+  The overview shows `Saved (parked)` and pending parking times; a scheduled
+  parking writes a line to `Park.log` in the VM's folder.
+- A parked VM has a saved state. Restoring a checkpoint and deleting the VM
+  both discard it. Templates are never parked.
 
 ### Reset to the checkpoint
 
@@ -295,7 +346,7 @@ the user has not asked, say what the restore will discard and wait.
 $checkpoints = @(Get-VMSnapshot -VM $vm | Where-Object Name -EQ 'clean')
 if ($checkpoints.Count -ne 1) { throw "Expected one 'clean' checkpoint, found $($checkpoints.Count)." }
 Restore-VMSnapshot -VMSnapshot $checkpoints[0] -Confirm:$false
-if ((Get-VM -Id $vm.Id).State -eq 'Off') { Start-VM -VM $vm }
+$vm = Start-VMUseVM -VM $vm
 ```
 
 Never delete, rename or replace a VM's checkpoint. Create another checkpoint,
@@ -326,6 +377,8 @@ refusal with `Remove-VM` or `Remove-Item`; tell the user what it said.
 - Templates are never started, changed, restored or deleted by an agent.
 - Creating a VM needs a request for it. Deleting one, and restoring a
   checkpoint, each need the user's explicit go for that VM.
+- DVMS, its components and builds under test go into a VM only on the user's
+  request for that installation. A clean VM stays clean until then.
 - Do not touch VMs the task is not about. Other people's work may be running
   in them.
 - Credentials, license content and guest passwords never go into chat, logs,

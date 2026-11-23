@@ -33,14 +33,17 @@ WHAT IT DOES
    The VM cannot reach
    the share, so each file is cached on the host under
    .cache\services\<server>\<share>\<path> (reused while size and time match)
-   and copied into the VM under C:\DVMSSetup\Services\Sources\<server>\<share>\<path>.
+   and put on the install media disk (see ..\VM-DVMS\README.txt, step 8) as
+   Sources\<server>\<share>\<path>. That one disk also carries the DVMS
+   installer, install.cmd and the recorder proxy installer; Windows sees it as
+   C:\DVMSSetup\Media. Nothing is copied into Windows except install.cmd.
 3. Copies install.cmd into C:\DVMSSetup\Services with each \\<server>\ prefix
-   rewritten to C:\DVMSSetup\Services\Sources\<server>\ (nothing else changes;
+   rewritten to C:\DVMSSetup\Media\Sources\<server>\ (nothing else changes;
    the host copy is .cache\scripts\<version>\install.cmd), and runs it there:
      cmd /d /c .\install.cmd > install-services.log 2>&1
    Each MSI writes <msi>.install.log next to it.
-4. Copies those logs to "<destination>\Install logs\Services", removes the
-   copied installers from the VM and restarts Windows when the log contains
+4. Copies those logs to "<destination>\Install logs\Services", removes
+   install.cmd from the VM and restarts Windows when the log contains
    "Restart the computer to complete the installation" (install.cmd still exits
    0 then). If install.cmd stops printing that line, the run warns before the VM
    is created.
@@ -50,18 +53,20 @@ WHAT IT DOES
    .msi in VmsRecorderProxyService\<version> when that folder exists, otherwise
    in the folder with the newest installer (today main-recorder-proxy, so
    VmsRecorderProxyServiceSetup.exe); -RecorderProxyInstaller picks another
-   file. It is cached on the host with the microservice installers, copied to
-   C:\DVMSSetup\RecorderProxy and run silently:
+   file. It is cached on the host with the microservice installers and run
+   silently from the install media disk, logging to C:\DVMSSetup\RecorderProxy:
      <installer>.exe /install /quiet /norestart /log RecorderProxy-install.log
    (an .msi runs with msiexec /i /qn /norestart /l*v). Its logs go to
    "<destination>\Install logs\RecorderProxy", and Windows restarts when it
-   returns 3010.
+   returns 3010. The install media disk is then detached and deleted.
 7. Confirms a DVMS product and a Recorder Proxy product are registered, D: is
    present, every MSI_CHECK file from install.cmd exists and the license file
    is still there, and warns about VMS* Windows services that are not running.
    The recorder, watchdog and system management services are delayed-start,
-   so it first waits until Windows has been up for 5 minutes while any are
-   stopped. The VM is left running.
+   which Windows starts about two minutes after a restart. The script starts
+   the stopped ones itself instead of waiting for that, then waits, at most
+   until Windows has been up for 5 minutes, while any are still stopped. The
+   VM is left running.
 
 The microservice order, MSI properties and keys all come from install.cmd on the
 share, so changes to it on main are picked up without changing this script. A
@@ -85,7 +90,7 @@ REQUIREMENTS
 
 FAILURES
 Nothing is deleted on failure. The VM, its files, the host license copy, the
-installers copied into the VM and any logs are kept for inspection, and the VM
-is left as it is.
+install media disk (still attached and mounted) and any logs are kept for
+inspection, and the VM is left as it is.
 
 License*.lic files and .cache are excluded from git.

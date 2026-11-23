@@ -102,7 +102,17 @@ $isAdmin=[Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsI
 
 Write-Output "Log: $LogPath"
 if ($isAdmin) {
-    & $powershell @processArguments
+    # The script's own output all arrives on the output stream. On the error
+    # stream Windows PowerShell adds progress records of its jobs as CLIXML,
+    # which is dropped here; anything else on that stream is passed on.
+    $ErrorActionPreference='Continue'
+    $clixml=$false
+    & $powershell @processArguments 2>&1 | ForEach-Object {
+        if ($_ -isnot [Management.Automation.ErrorRecord]) { return $_ }
+        $text=[string]$_.Exception.Message
+        if ($text -like '#< CLIXML*') { $clixml=$true }
+        if (-not $clixml) { $text }
+    }
     exit $LASTEXITCODE
 }
 

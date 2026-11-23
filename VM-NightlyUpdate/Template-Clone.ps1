@@ -219,7 +219,8 @@ function Wait-VMGuest {
         } catch {
             if ($_.Exception.Message -ne $lastFailure) { $lastFailure=$_.Exception.Message; Write-Verbose "Guest not ready: $lastFailure" }
         }
-        Start-Sleep -Seconds 10
+        # Short, so a booted guest is noticed quickly; each probe is cheap.
+        Start-Sleep -Seconds 3
     } while ((Get-Date) -lt $Deadline)
     throw "Windows did not become reachable through PowerShell Direct by $($Deadline.ToString('HH:mm:ss'))."
 }
@@ -287,7 +288,7 @@ function Set-VMCopyComputerName {
     do {
         $vm=Get-VM -Id $VMId
         if ($vm.State -eq 'Off') { break }
-        Start-Sleep -Seconds 5
+        Start-Sleep -Seconds 2
     } while ((Get-Date) -lt $shutdownDeadline)
     if ($vm.State -ne 'Off') { throw 'Windows did not shut down within 15 minutes; the checkpoint was not refreshed.' }
     # Reverting to the copied checkpoint would restore the template's computer

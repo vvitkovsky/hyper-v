@@ -8,6 +8,7 @@
 Import-Module Hyper-V
 Add-Type -AssemblyName System.Security
 # <repository>\.agents\skills\vm-use\scripts
+$VMUseScripts=$PSScriptRoot
 $VMUseRepository=Split-Path -Parent (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)))
 $VMUseNightlyUpdate=Join-Path $VMUseRepository 'VM-NightlyUpdate'
 foreach ($file in @('Maintenance-Common.ps1','Credential-Input.ps1','VM-Registration.ps1','Template-Clone.ps1')) { . (Join-Path $VMUseNightlyUpdate $file) }
@@ -128,4 +129,89 @@ function Stop-VMUseGuest {
         if ((Get-Date) -ge $deadline) { throw "Windows in '$($VM.Name)' did not shut down within $TimeoutMinutes minutes." }
         Start-Sleep -Seconds 5
     }
+}
+
+# ---- Parking ---------------------------------------------------------------
+# A test VM that nobody uses is parked: its state is saved to disk, which
+# frees the host's memory, and Start-VMUseVM resumes it where it was. A
+# one-time scheduled task per VM (VMUsePark-<VM ID>, running as SYSTEM) does
+# the parking, so it happens with no agent session open.
+
+function Get-VMUseParkTaskName {
+    param([Parameter(Mandatory=$true)]$VM)
+    'VMUsePark-'+([guid]$VM.Id).ToString('D')
+}
+
+function Get-VMUsePark {
+    # When the VM is due to be parked, or $null when no parking is pending.
+    param([Parameter(Mandatory=$true)]$VM)
+    $name=Get-VMUseParkTaskName $VM
+    if (-not (Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue)) { return $null }
+    $next=(Get-ScheduledTaskInfo -TaskName $name).NextRunTime
+    if ($next) { $next } else { $null }
+}
+
+function Register-VMUsePark {
+    # Parks the VM once it has gone unused for AfterMinutes. Calling it again
+    # restarts the countdown. Returns the time parking is due.
+    param([Parameter(Mandatory=$true)]$VM,[ValidateRange(1,1440)][int]$AfterMinutes=10,[switch]$ShutDown)
+    $current=Get-VM -Id $VM.Id
+    if ($current.Name -like '*Template*') { throw "'$($current.Name)' is a template; templates are never parked." }
+    $script=Join-Path $VMUseScripts 'Park-TestVM.ps1'
+    $arguments="-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$script`" -VMId $(([guid]$current.Id).ToString('D')) -AfterMinutes $AfterMinutes -Scheduled"
+    if ($ShutDown) { $arguments+=' -ShutDown' }
+    $due=(Get-Date).AddMinutes($AfterMinutes)
+    $action=New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -Argument $arguments -WorkingDirectory $VMUseScripts
+    $trigger=New-ScheduledTaskTrigger -Once -At $due
+    $principal=New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+    $settings=New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 30)
+    $description="Park test VM '$($current.Name)' when it has not been used for $AfterMinutes minutes: $(if ($ShutDown) { 'shut Windows down' } else { 'save its state' }). Registered by the vm-use skill; postponed while a script is using the VM."
+    Register-ScheduledTask -TaskName (Get-VMUseParkTaskName $current) -Description $description -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
+    $due
+}
+
+function Unregister-VMUsePark {
+    # Cancels pending parking. Returns whether there was any.
+    param([Parameter(Mandatory=$true)]$VM)
+    $name=Get-VMUseParkTaskName $VM
+    if (-not (Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue)) { return $false }
+    Unregister-ScheduledTask -TaskName $name -Confirm:$false
+    $true
+}
+
+function Enter-VMUseLock {
+    # Marks the VM as in use by this process until the process ends. Parking
+    # that falls due meanwhile is postponed. Returns whether the mark is held.
+    param([Parameter(Mandatory=$true)]$VM)
+    if (-not $global:VMUseLocks) { $global:VMUseLocks=@{} }
+    $key=([guid]$VM.Id).ToString('D')
+    if ($global:VMUseLocks.ContainsKey($key)) { return $true }
+    try { $global:VMUseLocks[$key]=Enter-VMUpdateMutex -VMId $VM.Id; $true }
+    catch { $false }
+}
+
+function Start-VMUseVM {
+    # Makes a test VM ready for use and returns it refreshed: marks it as in
+    # use, starts it from Off, resumes it when parked (Saved) or paused, and
+    # waits for Windows. It also arms the parking countdown, so a VM is never
+    # left running for good by a script that fails; -NoPark cancels parking
+    # instead, for a VM the user wants kept running.
+    param([Parameter(Mandatory=$true)]$VM,[ValidateRange(1,1440)][int]$ParkAfterMinutes=10,[switch]$NoPark,[int]$TimeoutMinutes=10)
+    $current=Get-VM -Id $VM.Id
+    if ($current.Name -like '*Template*') { throw "'$($current.Name)' is a template; templates are never started for use." }
+    if (-not (Enter-VMUseLock $current)) { Write-Warning "Another script is using '$($current.Name)' right now." }
+    switch ([string]$current.State) {
+        'Running' { }
+        'Paused' { Resume-VM -VM $current }
+        'Off' { Start-VM -VM $current }
+        'Saved' { Start-VM -VM $current }
+        default { throw "VM '$($current.Name)' is $($current.State); it can be used when it is Running, Off, Saved or Paused." }
+    }
+    if ($NoPark) { $null=Unregister-VMUsePark -VM $current } else { $null=Register-VMUsePark -VM $current -AfterMinutes $ParkAfterMinutes }
+    $deadline=(Get-Date).AddMinutes($TimeoutMinutes)
+    while ((Get-VM -Id $current.Id).Heartbeat -notlike 'Ok*') {
+        if ((Get-Date) -ge $deadline) { Write-Warning "Windows in '$($current.Name)' did not report a heartbeat within $TimeoutMinutes minutes."; break }
+        Start-Sleep -Seconds 3
+    }
+    Get-VM -Id $current.Id
 }

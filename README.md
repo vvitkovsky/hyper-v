@@ -46,12 +46,14 @@ VM-NightlyUpdate nightly tasks ─► a template VM   (Windows 11 Template, Wind
 - **DVMS copies** also get a static MAC address and a DVMS license re-signed
   for that address, which is written to `C:\Program Files\DVMS\Licenses`
   before the selected build is installed silently, and a second, dynamically
-  expanding disk formatted as `D:` (`Storage`) for recordings.
+  expanding disk formatted as `D:` (`Storage`) for recordings. The installer
+  reaches the VM on an install media disk that is attached for the
+  installation and removed afterwards, so it is never copied into Windows.
 - **DVMS v10 copies** (`VM-DVMS-v10`) also run the build's
   `scripts\install.cmd` in the VM before the DVMS installer, with the
-  microservice installers it needs copied in from the host, because the VM
-  cannot reach the build share. After the DVMS installer they install the
-  recorder proxy service from `VmsRecorderProxyService` on the same share.
+  microservice installers it needs on the same install media disk, because
+  the VM cannot reach the build share. After the DVMS installer they install
+  the recorder proxy service from `VmsRecorderProxyService` on the same share.
 
 ## Quick start
 
@@ -78,12 +80,18 @@ AI agents create, use and delete these VMs with the `vm-use` skill in
 scripts without their questions. [`AGENTS.md`](AGENTS.md), which `CLAUDE.md`
 imports, lists the skills for every agent working in this repository.
 
+The skill also parks a test VM that has not been used for 10 minutes: a
+one-time scheduled task (`VMUsePark-<VM ID>`, running as SYSTEM) saves its
+state, which frees the host's memory, and the next use resumes it.
+`.agents/skills/vm-use/scripts/Park-TestVM.ps1` parks a VM by hand or cancels
+pending parking.
+
 ## Requirements
 
 - Windows with Hyper-V, and an administrator account on the host.
 - At least one template VM, for example `Windows 11 Template`: Off, with
   exactly one checkpoint of the name chosen in `Install.cmd` (`clean` by
-  default) and the Guest Service Interface integration service enabled.
+  default).
 - Free space on the VM drive for a full copy of the template (about 65 GB for
   `Windows 11 Template` and 33 GB for `Windows Server 2025 Template`), plus
   the installer and about 10 GB for DVMS copies, and for DVMS v10 copies about

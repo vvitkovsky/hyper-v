@@ -43,10 +43,9 @@ A template is a VM with "Template" in its name, kept only to be copied.
 There can be several, for example Windows 11 Template and Windows Server 2025
 Template. Run Install.cmd for each: it sets up the nightly update and saves
 the guest credential that copies are renamed with. Each has its own permanent
-folder; Windows 11 Template lives at:
-  A:\HyperV Template\
-Only Hyper-V's normal Virtual Machines, Virtual Hard Disks and Snapshots
-subfolders are needed. A template stays registered and off between nightly
+folder, with only Hyper-V's normal Virtual Machines, Virtual Hard Disks and
+Snapshots subfolders. Copying reads the whole template, so keep the folders
+on fast storage. A template stays registered and off between nightly
 runs. Keep automatic host-start and automatic checkpoints disabled on it.
 
 Nightly maintenance updates each template at its own time, performs cleanup,

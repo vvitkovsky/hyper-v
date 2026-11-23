@@ -1,3 +1,66 @@
+Faster VM creation - 2026-11-23.
+
+- Renaming a copy polls the guest every 3 seconds instead of 10, and its
+  shutdown every 2 instead of 5 (Template-Clone.ps1). The second boot that
+  confirms the new name is kept.
+- DVMS installers are no longer copied into Windows with Copy-VMFile. They
+  are put on <destination>\Install media.vhdx (VM-DVMS\DVMS-Media.ps1), which
+  is attached to the running VM, mounted as C:\DVMSSetup\Media and removed
+  after the installations. For v10 the same disk carries install.cmd's
+  microservice installers and the recorder proxy. The Guest Service Interface
+  is no longer used.
+- New-VM-DVMS-v10 starts the stopped automatic VMS* services itself instead
+  of waiting two minutes for Windows to start the delayed ones.
+- Run for real, elevated: New-DVMSMediaDisk built a disk from four files in
+  nested folders plus an empty folder; a read-only mount showed NTFS labelled
+  DVMSMedia with every file identical to its source, and nothing left mounted.
+  The 16 selection and 22 parking cases still pass.
+- Live, same day: New-VM-DVMS created 'Windows Server 2025 Test DVMS v9.10'
+  from Windows Server 2025 Template with release-v9.10 Complete, exit 0,
+  DVMS-x64 9.10.2.0 registered, in 11 minutes: installer to cache 32 s,
+  template copy from the hard disk 3 min 44 s, rename with both boots, D:
+  and checkpoint 59 s, start and license 35 s, media disk built, attached
+  and mounted 13 s, installer 4 min 46 s. The media disk was detached and
+  deleted afterwards and C:\DVMSSetup\Media was gone.
+- After Windows Server 2025 Template was moved to an NVMe drive (C:\VMs,
+  Move-VMStorage, same VM ID, task re-registered with Install.ps1), Create-VM
+  made a clean copy in 92 s: copy 36 s, rename 44 s, shutdown and
+  checkpoint 10 s.
+- Not run: New-VM-DVMS-v10 with these changes (main had no
+  scripts\install.cmd on the share), so neither its media disk layout nor
+  the explicit start of delayed services has run in a VM.
+- Windows 11 Template: its nightly update has failed since 2026-11-11.
+  CBS.log, read from a read-only mount of its disk, shows KB5132061 failing
+  with 0x800f0993 PSFX_E_REBASE_HYDRATION_CANDIDATES_MISSING: the base files
+  of 28 components (Hyper-V, TPM, NFS, ProjFS and others) cannot be rebuilt
+  from the component store, which is marked corrupt. Its last successful run,
+  with DISM /ResetBase, was on 2026-11-10. Not repaired.
+
+Parking unused test VMs (vm-use skill) - 2026-11-23.
+
+- Start-VMUseVM arms a one-time SYSTEM task (VMUsePark-<VM ID>) that saves the
+  VM's state 10 minutes later through Park-TestVM.ps1. The task is postponed
+  while a script holds the VM's lock, the mutex of Maintenance-Common.ps1
+  keyed by the test VM's ID. Remove-TestVM cancels the task and discards a
+  saved state.
+- 22 mocked cases passed under Windows PowerShell 5.1, with Hyper-V and Task
+  Scheduler replaced by stand-ins: registering, restarting and cancelling the
+  countdown, Start-VMUseVM from Off, Saved, Paused and Running, parking now
+  and by schedule, a deleted VM, and templates refused. The in-use cases used
+  the real mutex held by a second process.
+- Live, same day, on 'Windows Server 2025 Test DVMS v9.10': Start-VMUseVM
+  armed a 2-minute countdown; the SYSTEM task parked the VM 4 seconds after
+  it fell due (Saved, 0 MB assigned) and wrote Park.log; Start-VMUseVM
+  resumed it, reachable after 15 s with the boot time unchanged and all seven
+  DVMS services running. Park-TestVM -AfterMinutes 1 parked it again and the
+  task removed itself.
+- Not run live: the -ShutDown variant, and postponement while a script holds
+  the VM (mocked only).
+- Remove-TestVM, run for real three times: a running clean VM in 7 seconds
+  (before the parking changes), then with them a parked DVMS VM (saved
+  state, storage disk, license copy, install logs, Park.log) in 8 seconds
+  and a clean VM that was off in 5 seconds. No parking task was left.
+
 Templates listed by name - 2026-11-23.
 
 - The template question (Get-TemplateCandidates in Template-Clone.ps1) now

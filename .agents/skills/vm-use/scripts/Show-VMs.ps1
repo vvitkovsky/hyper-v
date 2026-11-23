@@ -25,8 +25,12 @@ if (-not $others.Count) { Write-Host '  none' }
 foreach ($vm in $others) {
     $checkpoints=(@(Get-VMSnapshot -VM $vm | ForEach-Object Name) -join ', ')
     $macs=(@(Get-VMNetworkAdapter -VM $vm | ForEach-Object { "$($_.MacAddress)$(if (-not $_.DynamicMacAddressEnabled) { ' static' })" }) -join ', ')
+    $state=[string]$vm.State
+    if ($state -eq 'Saved') { $state='Saved (parked)' }
+    $due=Get-VMUsePark -VM $vm
+    if ($due) { $state+=", parks at $($due.ToString('HH:mm')) unless used" }
     Write-Host ("  {0}" -f $vm.Name)
-    Write-Host ("      state {0}, checkpoints: {1}, {2} GB on disk, MAC {3}" -f $vm.State,$(if ($checkpoints) { $checkpoints } else { 'none' }),[math]::Round((Get-VMUseDiskBytes $vm)/1GB,1),$macs)
+    Write-Host ("      state {0}, checkpoints: {1}, {2} GB on disk, MAC {3}" -f $state,$(if ($checkpoints) { $checkpoints } else { 'none' }),[math]::Round((Get-VMUseDiskBytes $vm)/1GB,1),$macs)
     Write-Host ("      folder {0}, id {1}" -f $vm.ConfigurationLocation,$vm.Id)
 }
 

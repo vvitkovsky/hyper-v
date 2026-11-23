@@ -47,7 +47,10 @@ if (-not $isAdmin) {
 }
 $guestSetup='C:\DVMSSetup'
 $guestServices=Join-Path $guestSetup 'Services'
-$guestMirror=Join-Path $guestServices 'Sources'
+# The installers are not copied into Windows: they sit on a disk of their own
+# that is mounted as this folder for the installation (DVMS-Media.ps1).
+$guestMedia=Join-Path $guestSetup 'Media'
+$guestMirror=Join-Path $guestMedia 'Sources'
 $exitCode=1
 try {
     Import-Module Hyper-V
@@ -59,6 +62,7 @@ try {
     . (Join-Path $dvms 'DVMS-License.ps1')
     . (Join-Path $dvms 'DVMS-Build.ps1')
     . (Join-Path $dvms 'DVMS-Storage.ps1')
+    . (Join-Path $dvms 'DVMS-Media.ps1')
     . (Join-Path $PSScriptRoot 'DVMS-Services.ps1')
 
     function Wait-GuestInstall {
@@ -84,16 +88,7 @@ try {
         catch { Write-Warning "Logs in $GuestFolder could not be copied: $($_.Exception.Message)" }
         finally { Remove-PSSession $session }
     }
-    function Copy-ToGuest([string]$Source,[string]$Target) {
-        for ($attempt=1; ; $attempt++) {
-            try { Copy-VMFile -VM $vm -SourcePath $Source -DestinationPath $Target -CreateFullPath -FileSource Host -Force; break }
-            catch {
-                # The guest service can take a moment to start after boot.
-                if ($attempt -ge 6) { throw }
-                Start-Sleep -Seconds 10
-            }
-        }
-    }
+
     function Restart-Guest {
         try {
             Invoke-VMGuestCommand -VMId $vm.Id -Credential $credential -Script { & "$env:SystemRoot\System32\shutdown.exe" /r /t 0 } | Out-Null
@@ -196,7 +191,7 @@ try {
     $cached=Save-DVMSInstaller -Source $selected -CacheDirectory $cacheDirectory
     Write-Host "Updating cached microservice installers in $servicesCache..."
     $cachedServices=@(foreach ($file in $services.Files) {
-        [pscustomobject]@{Host=Save-DVMSServiceFile -Source $file -CacheRoot $servicesCache;Guest=ConvertTo-DVMSMirrorPath $file.FullName $guestMirror}
+        [pscustomobject]@{Host=Save-DVMSServiceFile -Source $file -CacheRoot $servicesCache;Target=ConvertTo-DVMSMirrorPath $file.FullName 'Sources'}
     })
     $cachedProxy=if ($proxy) { Save-DVMSServiceFile -Source $proxy -CacheRoot $servicesCache } else { $null }
     $localScript=Join-Path (Join-Path (Join-Path (Join-Path $PSScriptRoot '.cache') 'scripts') $Version) 'install.cmd'
@@ -232,22 +227,28 @@ try {
     } | Out-Null
     Write-Host 'License copied to C:\Program Files\DVMS\Licenses\License.lic in the VM.'
 
-    # Copy-VMFile goes through the Guest Service Interface integration service.
-    $guestService=Get-VMIntegrationService -VM $vm | Where-Object Name -EQ 'Guest Service Interface'
-    if ($guestService -and -not $guestService.Enabled) { Enable-VMIntegrationService -VMIntegrationService $guestService }
     $hostLogs=Join-Path $settings.Destination 'Install logs'
 
+    # One disk carries everything that gets installed: the DVMS installer,
+    # install.cmd with its microservice installers laid out as on the share,
+    # and the recorder proxy.
+    $media=Join-Path $settings.Destination 'Install media.vhdx'
+    $mediaFiles=@([pscustomobject]@{Source=$cached;Target=$selected.Name},[pscustomobject]@{Source=$localScript;Target='install.cmd'})
+    $mediaFiles+=@($cachedServices | ForEach-Object { [pscustomobject]@{Source=$_.Host;Target=$_.Target} })
+    if ($proxy) { $mediaFiles+=[pscustomobject]@{Source=$cachedProxy;Target=(Join-Path 'RecorderProxy' $proxy.Name)} }
+    $mediaFolders=@($services.Folders | ForEach-Object { ConvertTo-DVMSMirrorPath $_ 'Sources' })
+    Write-Host ("Preparing the install media disk ({0} files, {1:N1} GB): $media" -f $mediaFiles.Count,(($selected.Length+$servicesBytes+$proxyBytes)/1GB))
+    $null=New-DVMSMediaDisk -Path $media -Files $mediaFiles -Folders $mediaFolders
+    $null=Mount-DVMSMediaDisk -VM $vm -Credential $credential -Path $media -GuestPath $guestMedia
+
     # The microservices go in first, so DVMS is installed on top of them.
-    Write-Host ("Copying {0} microservice installers into the VM ({1:N1} GB)..." -f $cachedServices.Count,($servicesBytes/1GB))
-    foreach ($file in $cachedServices) { Copy-ToGuest $file.Host $file.Guest }
-    $guestFolders=@($services.Folders | ForEach-Object { ConvertTo-DVMSMirrorPath $_ $guestMirror })
-    if ($guestFolders.Count) {
-        Invoke-VMGuestCommand -VMId $vm.Id -Credential $credential -Arguments @(,$guestFolders) -Script {
-            param($Folders)
-            foreach ($folder in $Folders) { New-Item -ItemType Directory -Path $folder -Force | Out-Null }
-        } | Out-Null
-    }
-    Copy-ToGuest $localScript (Join-Path $guestServices 'install.cmd')
+    # install.cmd runs from a folder on C:, as before: it copies each installer
+    # into its current directory and logs there.
+    Invoke-VMGuestCommand -VMId $vm.Id -Credential $credential -Arguments @($guestServices,(Join-Path $guestMedia 'install.cmd')) -Script {
+        param($Folder,$Script)
+        New-Item -ItemType Directory -Path $Folder -Force | Out-Null
+        Copy-Item -LiteralPath $Script -Destination (Join-Path $Folder 'install.cmd') -Force
+    } | Out-Null
     Write-Host "Installing microservices: $guestServices\install.cmd"
     $started=Get-Date
     $job=Invoke-Command -VMId $vm.Id -Credential $credential -AsJob -ArgumentList $guestServices,$services.RestartMarker -ScriptBlock {
@@ -268,9 +269,8 @@ try {
     $hostServiceLogs=Join-Path $hostLogs 'Services'
     Copy-GuestLogs $guestServices $hostServiceLogs
     if ($servicesResult.ExitCode -ne 0) { throw "Microservice installation failed with exit code $($servicesResult.ExitCode). See install-services.log in $hostServiceLogs" }
-    Invoke-VMGuestCommand -VMId $vm.Id -Credential $credential -Arguments @($guestServices,$guestMirror) -Script {
-        param($Folder,$Mirror)
-        Remove-Item -LiteralPath $Mirror -Recurse -Force
+    Invoke-VMGuestCommand -VMId $vm.Id -Credential $credential -Arguments @($guestServices) -Script {
+        param($Folder)
         Remove-Item -LiteralPath (Join-Path $Folder 'install.cmd') -Force
     } | Out-Null
     if ($servicesResult.Restart) {
@@ -278,9 +278,7 @@ try {
         $guest=Restart-Guest
     }
 
-    $guestInstaller=Join-Path $guestSetup $selected.Name
-    Write-Host ("Copying the installer into the VM ({0:N1} GB)..." -f ($selected.Length/1GB))
-    Copy-ToGuest $cached $guestInstaller
+    $guestInstaller=Join-Path $guestMedia $selected.Name
 
     $logPath=Join-Path $guestSetup 'DVMS-install.log'
     $arguments="$InstallerArguments /log `"$logPath`""
@@ -296,10 +294,6 @@ try {
     # Bring the installer logs next to the VM before judging the result.
     Copy-GuestLogs $guestSetup $hostLogs
     if ($installExit -notin @(0,3010)) { throw "DVMS installation failed with exit code $installExit. Logs: $hostLogs" }
-    Invoke-VMGuestCommand -VMId $vm.Id -Credential $credential -Arguments @($guestInstaller) -Script {
-        param($Path)
-        Remove-Item -LiteralPath $Path -Force
-    } | Out-Null
     if ($installExit -eq 3010) {
         Write-Host 'The installer requested a restart; restarting Windows...'
         $guest=Restart-Guest
@@ -308,9 +302,12 @@ try {
     # The recorder proxy goes in last, on top of the recorder.
     if ($proxy) {
         $guestProxy=Join-Path $guestSetup 'RecorderProxy'
-        $guestProxyInstaller=Join-Path $guestProxy $proxy.Name
-        Write-Host ("Copying the recorder proxy installer into the VM ({0:N0} MB)..." -f ($proxy.Length/1MB))
-        Copy-ToGuest $cachedProxy $guestProxyInstaller
+        $guestProxyInstaller=Join-Path (Join-Path $guestMedia 'RecorderProxy') $proxy.Name
+        # The installer writes its logs to this folder on C:.
+        Invoke-VMGuestCommand -VMId $vm.Id -Credential $credential -Arguments @($guestProxy) -Script {
+            param($Folder)
+            New-Item -ItemType Directory -Path $Folder -Force | Out-Null
+        } | Out-Null
         $proxyCommand=Get-DVMSRecorderProxyCommand $guestProxyInstaller (Join-Path $guestProxy 'RecorderProxy-install.log')
         Write-Host "Installing the recorder proxy: $($proxyCommand.FilePath) $($proxyCommand.Arguments)"
         $started=Get-Date
@@ -323,15 +320,13 @@ try {
         $hostProxyLogs=Join-Path $hostLogs 'RecorderProxy'
         Copy-GuestLogs $guestProxy $hostProxyLogs
         if ($proxyExit -notin @(0,3010)) { throw "Recorder proxy installation failed with exit code $proxyExit. Logs: $hostProxyLogs" }
-        Invoke-VMGuestCommand -VMId $vm.Id -Credential $credential -Arguments @($guestProxyInstaller) -Script {
-            param($Path)
-            Remove-Item -LiteralPath $Path -Force
-        } | Out-Null
         if ($proxyExit -eq 3010) {
             Write-Host 'The recorder proxy installer requested a restart; restarting Windows...'
             $guest=Restart-Guest
         }
     }
+    # Everything is installed; the media disk leaves the VM again.
+    Dismount-DVMSMediaDisk -VM $vm -Credential $credential -Path $media -GuestPath $guestMedia
 
     $installed=Invoke-VMGuestCommand -VMId $vm.Id -Credential $credential -Arguments @(,$services.Checks) -Script {
         param($Checks)
@@ -353,13 +348,20 @@ try {
     if ($proxy -and -not $installed.RecorderProxy.Count) { throw "The recorder proxy installer reported success, but no Recorder Proxy product is registered in the VM. Logs: $hostProxyLogs" }
     if ($installed.MissingServices.Count) { throw "install.cmd reported success, but these files are missing: $($installed.MissingServices -join ', '). Logs: $hostServiceLogs" }
     if (-not $installed.License) { Write-Warning 'C:\Program Files\DVMS\Licenses\License.lic is missing after installation.' }
-    # The recorder, watchdog and system management services are delayed-start,
-    # so Windows starts them about two minutes after the last restart.
+    # The recorder, watchdog and system management services are delayed-start:
+    # Windows starts them about two minutes after the last restart. They are
+    # started here instead of waited for; one that will not start yet is left
+    # to Windows, and the wait below still ends after 5 minutes of uptime.
     $vmsServices=$installed.Services
     $stopped=@($vmsServices | Where-Object Status -NE 'Running')
     if ($stopped.Count) {
-        for ($wait=0; $wait -lt 20; $wait++) {
-            $current=Invoke-VMGuestCommand -VMId $vm.Id -Credential $credential -Script {
+        for ($wait=0; $wait -lt 60; $wait++) {
+            $current=Invoke-VMGuestCommand -VMId $vm.Id -Credential $credential -Arguments @(-not $wait) -TimeoutSeconds 300 -Script {
+                param($StartStopped)
+                if ($StartStopped) {
+                    Get-Service -Name 'VMS*' -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq 'Stopped' -and $_.StartType -eq 'Automatic' } |
+                        ForEach-Object { try { Start-Service -InputObject $_ -ErrorAction Stop } catch { } }
+                }
                 [pscustomobject]@{
                     Uptime=((Get-Date)-(Get-CimInstance Win32_OperatingSystem).LastBootUpTime).TotalSeconds
                     Services=@(Get-Service -Name 'VMS*' -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { [pscustomobject]@{Name=$_.Name;Status=[string]$_.Status} })
@@ -368,8 +370,8 @@ try {
             $vmsServices=$current.Services
             $stopped=@($vmsServices | Where-Object Status -NE 'Running')
             if (-not $stopped.Count -or $current.Uptime -gt 300) { break }
-            if (-not $wait) { Write-Host 'Waiting for delayed-start services...' }
-            Start-Sleep -Seconds 15
+            if (-not $wait) { Write-Host 'Started the delayed-start services; waiting for the rest...' }
+            Start-Sleep -Seconds 5
         }
     }
     if ($stopped.Count) { Write-Warning ("Services not running: {0}" -f (($stopped | ForEach-Object { "$($_.Name) ($($_.Status))" }) -join ', ')) }

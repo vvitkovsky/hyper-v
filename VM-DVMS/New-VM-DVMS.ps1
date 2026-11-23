@@ -45,6 +45,7 @@ try {
     . (Join-Path $PSScriptRoot 'DVMS-License.ps1')
     . (Join-Path $PSScriptRoot 'DVMS-Build.ps1')
     . (Join-Path $PSScriptRoot 'DVMS-Storage.ps1')
+    . (Join-Path $PSScriptRoot 'DVMS-Media.ps1')
 
     # Ask everything first so the long copy and install run unattended.
     $selection=Resolve-TemplateSelection -TemplateName $TemplateName -CheckpointName $CheckpointName -BaseDirectory $nightlyUpdate
@@ -148,19 +149,14 @@ try {
     } | Out-Null
     Write-Host 'License copied to C:\Program Files\DVMS\Licenses\License.lic in the VM.'
 
-    # Copy-VMFile goes through the Guest Service Interface integration service.
-    $guestService=Get-VMIntegrationService -VM $vm | Where-Object Name -EQ 'Guest Service Interface'
-    if ($guestService -and -not $guestService.Enabled) { Enable-VMIntegrationService -VMIntegrationService $guestService }
-    $guestInstaller=Join-Path $guestSetup $selected.Name
-    Write-Host ("Copying the installer into the VM ({0:N1} GB)..." -f ($selected.Length/1GB))
-    for ($attempt=1; ; $attempt++) {
-        try { Copy-VMFile -VM $vm -SourcePath $cached -DestinationPath $guestInstaller -CreateFullPath -FileSource Host -Force; break }
-        catch {
-            # The guest service can take a moment to start after boot.
-            if ($attempt -ge 6) { throw }
-            Start-Sleep -Seconds 10
-        }
-    }
+    # The installer is not copied into Windows: it sits on a disk of its own
+    # that is attached for the installation and removed afterwards.
+    $media=Join-Path $settings.Destination 'Install media.vhdx'
+    $guestMedia=Join-Path $guestSetup 'Media'
+    Write-Host ("Preparing the install media disk ({0:N1} GB): $media" -f ($selected.Length/1GB))
+    $null=New-DVMSMediaDisk -Path $media -Files @([pscustomobject]@{Source=$cached;Target=$selected.Name})
+    $null=Mount-DVMSMediaDisk -VM $vm -Credential $credential -Path $media -GuestPath $guestMedia
+    $guestInstaller=Join-Path $guestMedia $selected.Name
 
     $logPath=Join-Path $guestSetup 'DVMS-install.log'
     $arguments="$InstallerArguments /log `"$logPath`""
@@ -191,11 +187,8 @@ try {
     try { Copy-Item -FromSession $session -Path (Join-Path $guestSetup '*.log') -Destination $hostLogs -Force }
     catch { Write-Warning "Installer logs could not be copied: $($_.Exception.Message)" }
     finally { Remove-PSSession $session }
-    if ($installExit -notin @(0,3010)) { throw "DVMS installation failed with exit code $installExit. Logs: $hostLogs" }
-    Invoke-VMGuestCommand -VMId $vm.Id -Credential $credential -Arguments @($guestInstaller) -Script {
-        param($Path)
-        Remove-Item -LiteralPath $Path -Force
-    } | Out-Null
+    if ($installExit -notin @(0,3010)) { throw "DVMS installation failed with exit code $installExit. Logs: $hostLogs. The install media disk was left attached." }
+    Dismount-DVMSMediaDisk -VM $vm -Credential $credential -Path $media -GuestPath $guestMedia
     if ($installExit -eq 3010) {
         Write-Host 'The installer requested a restart; restarting Windows...'
         try {

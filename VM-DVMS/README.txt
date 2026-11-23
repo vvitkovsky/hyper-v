@@ -49,13 +49,17 @@ WHAT IT DOES
    kept), re-signs it like LicenseEncoder, verifies the result, and saves a copy
    as <destination>\License.lic.
 7. Starts the VM and writes the license to C:\Program Files\DVMS\Licenses\License.lic.
-8. Copies the installer to C:\DVMSSetup with Copy-VMFile and runs it:
+8. Puts the installer on a disk of its own, <destination>\Install media.vhdx,
+   attaches that to the running VM, mounts it in Windows as the folder
+   C:\DVMSSetup\Media and runs the installer from there:
      <installer> /i /q /norestart /log "C:\DVMSSetup\DVMS-install.log"
    /norestart lets the script restart Windows itself when the installer returns
    3010. Override the switches with -InstallerArguments; /log is always added.
-9. Copies the installer logs to "<destination>\Install logs", removes the
-   installer from the VM, confirms a DVMS product is registered, D: is present
-   and the license file is still there. The VM is left running.
+   The installer is not copied into Windows, which would take longer and leave
+   the VM's disk larger by its size for good.
+9. Copies the installer logs to "<destination>\Install logs", detaches and
+   deletes the install media disk, confirms a DVMS product is registered, D: is
+   present and the license file is still there. The VM is left running.
 
 PARAMETERS (all optional; supplying one skips its question)
   -Name, -Destination, -ComputerName, -Version, -Installer (file name),
@@ -80,6 +84,7 @@ REQUIREMENTS
 
 FAILURES
 Nothing is deleted on failure. The VM, its files, the host license copy and any
-installer logs are kept for inspection, and the VM is left as it is.
+installer logs are kept for inspection, and the VM is left as it is. After a
+failed installation the install media disk is still attached and mounted.
 
 License*.lic files and .cache are excluded from git.

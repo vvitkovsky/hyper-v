@@ -52,7 +52,10 @@ try {
     foreach ($path in $outside) { Write-Host "Kept, outside the folder: $path" }
 
     if ($PSCmdlet.ShouldProcess("$($vm.Name) and $folder",'Delete the VM and its folder')) {
-        if ($vm.State -ne 'Off') { Stop-VM -VM $vm -TurnOff -Force }
+        try { $null=Unregister-VMUsePark -VM $vm } catch { Write-Warning "Pending parking could not be cancelled: $($_.Exception.Message)" }
+        # A parked VM has a saved state instead of running; discard it.
+        if ($vm.State -eq 'Saved') { Remove-VMSavedState -VM $vm }
+        elseif ($vm.State -ne 'Off') { Stop-VM -VM $vm -TurnOff -Force }
         Remove-VM -VM $vm -Force
         if (Get-VM -Id $vm.Id -ErrorAction SilentlyContinue) { throw 'Hyper-V still lists the VM.' }
         # Hyper-V can hold the disks for a while after removing checkpoints.
