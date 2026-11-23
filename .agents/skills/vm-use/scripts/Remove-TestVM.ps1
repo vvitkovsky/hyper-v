@@ -12,7 +12,7 @@ try {
     . (Join-Path $PSScriptRoot 'VM-Use.ps1')
     $vm=Get-VMUseVM $Name
     if (@(Get-VMUpdateInstallations -BaseDirectory $VMUseNightlyUpdate | Where-Object VMId -EQ $vm.Id).Count) { throw "'$Name' is a template with nightly updates; this script never deletes templates." }
-    if ($vm.Name -match '\bTemplate\s*$') { throw "'$Name' is named as a template; this script never deletes templates." }
+    if ($vm.Name -like '*Template*') { throw "'$Name' has ""Template"" in its name, so it is a template; this script never deletes templates." }
 
     # The creation scripts give each VM a folder of its own.
     $folder=[IO.Path]::GetFullPath($vm.ConfigurationLocation).TrimEnd('\')

@@ -8,11 +8,12 @@ $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'VM-Use.ps1')
 
 $templates=@(Get-VMUseTemplates)
-Write-Host 'TEMPLATES (installed with VM-NightlyUpdate\Install.cmd; pass the name as -TemplateName)'
-if (-not $templates.Count) { Write-Host '  none: run VM-NightlyUpdate\Install.cmd for a template VM first.' }
+Write-Host 'TEMPLATES (VMs with "Template" in the name, or with nightly updates; pass the name as -TemplateName)'
+if (-not $templates.Count) { Write-Host '  none: name a VM "... Template" and run VM-NightlyUpdate\Install.cmd for it first.' }
 foreach ($template in $templates) {
+    $nightly=if ($template.Installed) { "nightly update $($template.NightlyUpdate)" } else { 'no nightly update' }
     Write-Host ("  {0}" -f $template.Name)
-    Write-Host ("      state {0}, checkpoint '{1}', nightly update {2}, {3} GB on disk" -f $template.State,$template.Checkpoint,$template.NightlyUpdate,$template.SizeGB)
+    Write-Host ("      state {0}, checkpoint '{1}', {2}, {3} GB on disk" -f $template.State,$template.Checkpoint,$nightly,$template.SizeGB)
     if ($template.Ready) { Write-Host '      ready to copy' }
     else { Write-Host "      NOT READY: $($template.Problems)" }
 }

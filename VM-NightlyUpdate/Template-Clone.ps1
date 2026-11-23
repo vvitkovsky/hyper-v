@@ -94,26 +94,46 @@ function Test-GuestComputerName([string]$ComputerName) {
 
 function Get-TemplateVM([string]$TemplateName) {
     $found=@(Get-VM | Where-Object Name -EQ $TemplateName)
-    if ($found.Count -eq 0) { throw "Template VM '$TemplateName' was not found. Create and install it with VM-NightlyUpdate first." }
+    if ($found.Count -eq 0) { throw "Template VM '$TemplateName' was not found. Create it and run VM-NightlyUpdate\Install.cmd for it first." }
     if ($found.Count -gt 1) { throw "More than one VM is named '$TemplateName'; rename the extra VM first." }
     $found[0]
 }
 
+function Get-TemplateCandidates {
+    # The VMs offered as templates: every VM with "Template" in its name, and
+    # every VM with nightly updates installed whatever its name. Installation
+    # is $null for a VM that Install.cmd was not run for; such a VM has no
+    # saved guest credential, so its copies cannot be renamed.
+    param([object[]]$Installations=@())
+    $vms=@(Get-VM)
+    $candidates=@(foreach ($vm in $vms) {
+        $installation=@($Installations | Where-Object VMId -EQ $vm.Id) | Select-Object -First 1
+        if ($installation -or $vm.Name -like '*Template*') { [pscustomobject]@{Name=$vm.Name;Id=$vm.Id;VM=$vm;Installation=$installation} }
+    })
+    # An installation whose VM has been deleted is still listed, as before.
+    foreach ($installation in $Installations) {
+        if (-not @($vms | Where-Object Id -EQ $installation.VMId).Count) {
+            $candidates+=[pscustomobject]@{Name=$installation.VMName;Id=$installation.VMId;VM=$null;Installation=$installation}
+        }
+    }
+    $candidates | Sort-Object Name
+}
+
 function Resolve-TemplateSelection {
-    # Needs VM-Registration.ps1 loaded. Without a name, asks which of the
-    # templates installed with Install.cmd to copy. Without a checkpoint name,
-    # uses the one the template's nightly task refreshes.
+    # Needs VM-Registration.ps1 loaded. Without a name, asks which template to
+    # copy. Without a checkpoint name, uses the one the template's nightly
+    # task refreshes, or clean for a VM without nightly updates.
     param([string]$TemplateName,[string]$CheckpointName,[Parameter(Mandatory=$true)][string]$BaseDirectory)
     $installations=@(Get-VMUpdateInstallations -BaseDirectory $BaseDirectory | Sort-Object VMName)
     if ([string]::IsNullOrWhiteSpace($TemplateName)) {
-        if (-not $installations.Count) { throw 'No template has nightly updates installed. Run VM-NightlyUpdate\Install.cmd for the template first, or supply -TemplateName.' }
-        $default=if (@($installations | Where-Object VMName -EQ 'Windows 11 Template').Count) { 'Windows 11 Template' } elseif ($installations.Count -eq 1) { $installations[0].VMName } else { $null }
-        Write-Host 'Templates (VMs updated nightly by VM-NightlyUpdate):'
-        $TemplateName=Read-VMUpdateChoice -Prompt 'Template to copy' -Default $default -Items @($installations | ForEach-Object {
-            $state=(Get-VM -Id $_.VMId -ErrorAction SilentlyContinue).State
-            $detail="checkpoint $($_.Checkpoint)"
-            if (-not $state) { $detail+=', VM not found' } elseif ($state -ne 'Off') { $detail+=", $state - shut it down before copying" }
-            [pscustomobject]@{ Name=$_.VMName; Detail=$detail }
+        $candidates=@(Get-TemplateCandidates -Installations $installations)
+        if (-not $candidates.Count) { throw 'No template was found: no VM has "Template" in its name or nightly updates installed. Create a template VM and run VM-NightlyUpdate\Install.cmd for it, or supply -TemplateName.' }
+        $default=if (@($candidates | Where-Object Name -EQ 'Windows 11 Template').Count) { 'Windows 11 Template' } elseif ($candidates.Count -eq 1) { $candidates[0].Name } else { $null }
+        Write-Host 'Templates (VMs with "Template" in the name, or updated nightly by VM-NightlyUpdate):'
+        $TemplateName=Read-VMUpdateChoice -Prompt 'Template to copy' -Default $default -Items @($candidates | ForEach-Object {
+            $detail=if ($_.Installation) { "checkpoint $($_.Installation.Checkpoint)" } else { 'no nightly updates or saved credential - run Install.cmd for it' }
+            if (-not $_.VM) { $detail+=', VM not found' } elseif ($_.VM.State -ne 'Off') { $detail+=", $($_.VM.State) - shut it down before copying" }
+            [pscustomobject]@{ Name=$_.Name; Detail=$detail }
         })
     }
     $template=Get-TemplateVM $TemplateName
@@ -124,7 +144,7 @@ function Resolve-TemplateSelection {
     [pscustomobject]@{
         Name=$TemplateName;VM=$template;CheckpointName=$CheckpointName
         # 'Windows Server 2025 Template' suggests 'Windows Server 2025 Test'.
-        DefaultCopyName=($TemplateName -replace '\s*\bTemplate$','').Trim()+' Test'
+        DefaultCopyName=((($TemplateName -replace '\s*\bTemplate\b','').Trim())+' Test').Trim()
     }
 }
 

@@ -1,3 +1,16 @@
+Templates listed by name - 2026-11-23.
+
+- The template question (Get-TemplateCandidates in Template-Clone.ps1) now
+  lists every VM with "Template" in its name, and still any VM with nightly
+  updates installed under another name. A VM that Install.cmd was not run for
+  is marked: it has no saved credential, so its copies cannot be renamed.
+  The vm-use skill's overview and delete guard use the same list.
+- 16 mocked cases passed under Windows PowerShell 5.1, replacing the 10 of the
+  entry below: the list and its details, a VM only named Template, an
+  installed VM without the word, an installation whose VM is gone, the
+  defaults with one and with several templates, and no template at all.
+  No VM was created with the changed scripts.
+
 Template question in the DVMS scripts - 2026-11-23.
 
 - New-VM-DVMS and New-VM-DVMS-v10 now ask which template to copy, through

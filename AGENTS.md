@@ -12,7 +12,7 @@ the user names one (`vm-use`, `/vm-use`, `$vm-use`), read its `SKILL.md`
 completely and follow it before doing anything else.
 
 - [`vm-use`](.agents/skills/vm-use/SKILL.md): create a test VM (clean, DVMS
-  v9 or DVMS v10) from any installed template, work inside one, reset it to
+  v9 or DVMS v10) from any template VM, work inside one, reset it to
   its checkpoint, or delete it. Use it for every such request instead of
   calling the scripts or Hyper-V directly.
 

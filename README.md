@@ -28,8 +28,11 @@ VM-NightlyUpdate nightly tasks ─► a template VM   (Windows 11 Template, Wind
    test VM: own disks and computer name, Off      test VM: licensed for its MAC, DVMS installed, Running
 ```
 
-- **A template** is any VM set up with `Install.cmd`; there can be several,
-  for example one for Windows 11 and one for Windows Server. Each stays Off
+- **A template** is a VM with `Template` in its name, kept only to be copied;
+  there can be several, for example one for Windows 11 and one for Windows
+  Server. `Install.cmd` sets up its nightly maintenance and saves the guest
+  credential the creation scripts need, so a template is ready to copy once
+  that has been run for it. Each stays Off
   between runs and has its own scheduled task (`HyperVNightlyUpdate-<VM ID>`,
   running as SYSTEM), time and checkpoint. Every night the task starts the
   template, installs all offered Windows updates, runs DISM component

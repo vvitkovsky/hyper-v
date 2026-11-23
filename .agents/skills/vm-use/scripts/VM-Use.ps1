@@ -39,30 +39,36 @@ function Get-VMUseDiskBytes {
 }
 
 function Get-VMUseTemplates {
-    # The VMs installed with VM-NightlyUpdate\Install.cmd, which every creation
-    # script can copy, and whether each passes the checks those scripts make.
-    foreach ($installation in @(Get-VMUpdateInstallations -BaseDirectory $VMUseNightlyUpdate | Sort-Object VMName)) {
-        $vm=Get-VM -Id $installation.VMId -ErrorAction SilentlyContinue
+    # The templates, as the creation scripts list them: every VM with
+    # "Template" in its name, and every VM with nightly updates installed. For
+    # each, whether it passes the checks those scripts make before copying.
+    $installations=@(Get-VMUpdateInstallations -BaseDirectory $VMUseNightlyUpdate)
+    foreach ($candidate in @(Get-TemplateCandidates -Installations $installations)) {
+        $vm=$candidate.VM; $installation=$candidate.Installation
+        $checkpoint=if ($installation) { $installation.Checkpoint } else { 'clean' }
+        $credentialPath=if ($installation) { Join-Path $installation.Root 'guest-credential.json' } else { $null }
         $problems=@()
         if (-not $vm) { $problems+='the VM no longer exists' }
         else {
             if ($vm.State -ne 'Off') { $problems+="it is $($vm.State) and must be Off" }
-            $count=@(Get-VMSnapshot -VM $vm | Where-Object Name -EQ $installation.Checkpoint).Count
-            if ($count -ne 1) { $problems+="it has $count '$($installation.Checkpoint)' checkpoints and needs exactly one" }
+            $count=@(Get-VMSnapshot -VM $vm | Where-Object Name -EQ $checkpoint).Count
+            if ($count -ne 1) { $problems+="it has $count '$checkpoint' checkpoints and needs exactly one" }
             if (@(Get-VM | Where-Object Name -EQ $vm.Name).Count -ne 1) { $problems+='another VM has the same name' }
         }
-        if (-not (Test-Path -LiteralPath (Join-Path $installation.Root 'guest-credential.json'))) { $problems+='no guest credential is saved' }
+        if (-not $installation) { $problems+='VM-NightlyUpdate\Install.cmd was not run for it, so it has no saved guest credential' }
+        elseif (-not (Test-Path -LiteralPath $credentialPath)) { $problems+='no guest credential is saved' }
         [pscustomobject]@{
             # The scripts find a template by its current name.
-            Name=$(if ($vm) { $vm.Name } else { $installation.VMName })
-            Id=$installation.VMId
-            Checkpoint=$installation.Checkpoint
-            NightlyUpdate=$installation.Time
+            Name=$candidate.Name
+            Id=$candidate.Id
+            Installed=[bool]$installation
+            Checkpoint=$checkpoint
+            NightlyUpdate=$(if ($installation) { $installation.Time } else { $null })
             State=$(if ($vm) { [string]$vm.State } else { 'missing' })
             SizeGB=$(if ($vm) { [math]::Round((Get-VMUseDiskBytes $vm)/1GB,1) } else { $null })
             Ready=(-not $problems.Count)
             Problems=($problems -join '; ')
-            CredentialPath=(Join-Path $installation.Root 'guest-credential.json')
+            CredentialPath=$credentialPath
         }
     }
 }
@@ -77,7 +83,7 @@ function Get-VMUseCredential {
     param([Parameter(Mandatory=$true)]$VM,[string]$TemplateName,[int]$TimeoutMinutes=10)
     $vm=Get-VM -Id $VM.Id
     if ($vm.State -ne 'Running') { throw "VM '$($vm.Name)' is $($vm.State); start it before asking for its credential." }
-    $templates=@(Get-VMUseTemplates | Where-Object { Test-Path -LiteralPath $_.CredentialPath })
+    $templates=@(Get-VMUseTemplates | Where-Object { $_.CredentialPath -and (Test-Path -LiteralPath $_.CredentialPath) })
     if ($TemplateName) {
         $templates=@($templates | Where-Object Name -EQ $TemplateName)
         if (-not $templates.Count) { throw "No saved guest credential for template '$TemplateName'. Run VM-NightlyUpdate\Install.cmd for it." }

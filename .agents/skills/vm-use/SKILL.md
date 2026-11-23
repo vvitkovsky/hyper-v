@@ -5,10 +5,11 @@ description: Create, use and delete Hyper-V test VMs with this repository's scri
 
 # Test VMs
 
-Test VMs are full, independent copies of a **template**: a VM that
-`VM-NightlyUpdate` keeps updated every night and that stays Off. Any installed
-template can be copied, for example `Windows 11 Template` or
-`Windows Server 2025 Template`.
+A test VM is always created as a full, independent copy of a **template**. A
+template is any VM with `Template` in its name, for example
+`Windows 11 Template` or `Windows Server 2025 Template`; it stays Off and
+`VM-NightlyUpdate` keeps it updated every night. The overview in step 1 lists
+the templates this host has; never assume the list.
 
 | Wanted | Script | Result |
 |---|---|---|
@@ -76,10 +77,15 @@ This read-only overview lists the templates (name, state, checkpoint, size,
 whether each is ready to copy), every other VM with its folder and
 checkpoints, and free disk space and host memory.
 
-A template is ready when it is Off, has exactly one checkpoint with the listed
-name and has a saved guest credential. When it is not ready, tell the user why
-and stop. Never start, stop, change or restore a template yourself, and do not
-create VMs while its nightly update is running (the overview shows the time).
+The template list is every VM with `Template` in its name, plus any VM that
+has nightly updates installed under another name. A template is ready when it
+is Off, has exactly one checkpoint with the listed name and has a saved guest
+credential, which `VM-NightlyUpdate\Install.cmd` stores when it sets up the
+nightly update. A VM that is only named as a template is listed as not ready
+until the user has run `Install.cmd` for it. When a template is not ready,
+tell the user why and stop. Never start, stop, change or restore a template
+yourself, and do not create VMs while its nightly update is running (the
+overview shows the time).
 
 ## 2. Decide the parameters
 
@@ -88,9 +94,10 @@ the user the template, name, folder and (for DVMS) build you are going to use
 before starting. Ask only when the request leaves a real choice open, for
 example which of several templates or DVMS versions.
 
-- **Template** (`-TemplateName`): the exact name from the overview. Use the one
-  the request implies ("a Windows Server VM"). When it implies none, use
-  `Windows 11 Template`, the scripts' own default.
+- **Template** (`-TemplateName`): the exact name from the overview's template
+  list. Use the one the request implies ("a Windows Server VM"). When it
+  implies none, use `Windows 11 Template`, the scripts' own default; if that
+  one is not listed and several others are, ask.
 - **Name** (`-Name`): must not be used by another VM. The scripts' convention
   is the template name with `Template` replaced by `Test`, for example
   `Windows Server 2025 Test`. Add what distinguishes this VM, for example

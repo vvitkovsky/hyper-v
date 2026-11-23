@@ -5,10 +5,10 @@ a template kept up to date by ..\VM-NightlyUpdate, binds a DVMS license to the
 new VM's MAC address and installs a DVMS build silently.
 
 All questions come first, so the slow steps then run unattended:
-  Template to copy [1]:           (numbered list of the templates installed with
-                                   ..\VM-NightlyUpdate\Install.cmd; type a number
-                                   or a name. Enter picks Windows 11 Template, or
-                                   the only template)
+  Template to copy [1]:           (numbered list of the VMs with "Template" in the
+                                   name, as in ..\VM-NightlyUpdate\Create-VM.cmd;
+                                   type a number or a name. Enter picks Windows 11
+                                   Template, or the only template)
   New VM name [Windows 11 Test]:  (the template name with "Template" replaced by
                                    "Test"; the next two defaults follow it)
   Destination [A:\VMs\<chosen name>]:

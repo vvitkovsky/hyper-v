@@ -4,7 +4,7 @@ param(
     [ValidateNotNullOrEmpty()][string]$Name,
     [ValidateNotNullOrEmpty()][string]$Destination,
     [string]$ComputerName,
-    # Left empty, the template is chosen from those installed with Install.cmd,
+    # Left empty, the template is chosen from the VMs with "Template" in the name,
     # and the checkpoint is the one its nightly task refreshes.
     [string]$TemplateName,
     [string]$CheckpointName,

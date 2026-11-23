@@ -12,9 +12,8 @@ param(
     [string]$Version,
     [string]$Installer,
     [string]$LicensePath,
-    # Left empty, the template is chosen from those installed with
-    # VM-NightlyUpdate\Install.cmd, and the checkpoint is the one its nightly
-    # task refreshes.
+    # Left empty, the template is chosen from the VMs with "Template" in the
+    # name, and the checkpoint is the one its nightly task refreshes.
     [string]$TemplateName,
     [string]$CheckpointName,
     [string]$BuildRoot = '\\rdfileserver\builds\DVMS',

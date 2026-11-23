@@ -39,9 +39,11 @@ credentials are reused. Include Maintenance-Common.ps1 with the other scripts.
 Source-folder permissions remain unchanged for the requested testing setup.
 
 TEMPLATES AND CREATING MORE VMS
-A template is a VM installed with Install.cmd and kept only to be copied.
+A template is a VM with "Template" in its name, kept only to be copied.
 There can be several, for example Windows 11 Template and Windows Server 2025
-Template. Each has its own permanent folder; Windows 11 Template lives at:
+Template. Run Install.cmd for each: it sets up the nightly update and saves
+the guest credential that copies are renamed with. Each has its own permanent
+folder; Windows 11 Template lives at:
   A:\HyperV Template\
 Only Hyper-V's normal Virtual Machines, Virtual Hard Disks and Snapshots
 subfolders are needed. A template stays registered and off between nightly
@@ -55,18 +57,22 @@ existing copies.
 
 To create a VM, run Create-VM.cmd. It prompts for the template, name,
 destination and Windows computer name:
-  Templates (VMs updated nightly by VM-NightlyUpdate):
-    1. Windows 11 Template              checkpoint clean
-    2. Windows Server 2025 Template     checkpoint clean
-  Template to copy [1]:
+  Templates (VMs with "Template" in the name, or updated nightly by VM-NightlyUpdate):
+    1. Windows 10 Template              no nightly updates or saved credential - run Install.cmd for it
+    2. Windows 11 Template              checkpoint clean
+    3. Windows Server 2025 Template     checkpoint clean
+  Template to copy [2]:
   New VM name [Windows 11 Test]:
   Destination [A:\VMs\<chosen name>]:
   Windows computer name [WIN11-Test]:
 Press Enter to accept each default, or type your own value. The templates are
-the VMs installed with Install.cmd from this folder; type a number or the exact
-name. Enter picks Windows 11 Template (or the only template); a template that
-is not off is marked, because it cannot be copied until it is shut down. The
-checkpoint copied is the one the template's nightly task refreshes.
+every VM with "Template" in its name, and any VM with nightly updates
+installed under another name; type a number or the exact name. Enter picks
+Windows 11 Template (or the only template). A template that is not off is
+marked, because it cannot be copied until it is shut down. One that Install.cmd
+was not run for is marked too: it has no saved credential, so only
+-KeepComputerName can copy it. The checkpoint copied is the one the template's
+nightly task refreshes, or clean for a template without one.
 The default VM name is the template name with "Template" replaced by "Test",
 for example Windows Server 2025 Test. The default path uses the name you chose.
 Names used as folders must be valid Windows folder names. The default computer
