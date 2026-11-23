@@ -7,7 +7,7 @@
 # Invoke-VMGuestCommand (a guest command with a timeout) and Wait-VMGuest.
 Import-Module Hyper-V
 Add-Type -AssemblyName System.Security
-# <repository>\.claude\skills\vm-use\scripts
+# <repository>\.agents\skills\vm-use\scripts
 $VMUseRepository=Split-Path -Parent (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)))
 $VMUseNightlyUpdate=Join-Path $VMUseRepository 'VM-NightlyUpdate'
 foreach ($file in @('Maintenance-Common.ps1','Credential-Input.ps1','VM-Registration.ps1','Template-Clone.ps1')) { . (Join-Path $VMUseNightlyUpdate $file) }

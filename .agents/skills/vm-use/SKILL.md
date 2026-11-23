@@ -33,7 +33,7 @@ administrator and Windows PowerShell 5.1. Use the wrapper for every script that
 touches Hyper-V:
 
 ```powershell
-.\.claude\skills\vm-use\scripts\Invoke-Elevated.ps1 -ScriptPath <script.ps1> -Parameters @{ Name='...'; Switch=$true }
+.\.agents\skills\vm-use\scripts\Invoke-Elevated.ps1 -ScriptPath <script.ps1> -Parameters @{ Name='...'; Switch=$true }
 ```
 
 - In an elevated session it runs the script directly. Otherwise it starts it
@@ -55,6 +55,11 @@ Do not run the creation scripts or the `.cmd` launchers directly: they elevate
 into a separate window, where their output is lost and their questions wait
 for a person.
 
+If your commands run in a sandbox, run the wrapper outside it, asking for
+that approval if needed: a sandboxed process cannot raise the UAC prompt or
+reach Hyper-V. The checks marked as needing no elevation only read files and
+the build share.
+
 Creation runs for a long time: a clean copy takes several minutes, the DVMS
 variants much longer (the scripts allow the installer up to 120 minutes). Start
 the wrapper as a background command when your shell tool has a time limit,
@@ -64,7 +69,7 @@ for progress.
 ## 1. Look first
 
 ```powershell
-.\.claude\skills\vm-use\scripts\Invoke-Elevated.ps1 -ScriptPath .\.claude\skills\vm-use\scripts\Show-VMs.ps1
+.\.agents\skills\vm-use\scripts\Invoke-Elevated.ps1 -ScriptPath .\.agents\skills\vm-use\scripts\Show-VMs.ps1
 ```
 
 This read-only overview lists the templates (name, state, checkpoint, size,
@@ -111,7 +116,7 @@ maintenance lock.
 ### Clean VM
 
 ```powershell
-.\.claude\skills\vm-use\scripts\Invoke-Elevated.ps1 -ScriptPath .\VM-NightlyUpdate\Create-VM.ps1 -Parameters @{
+.\.agents\skills\vm-use\scripts\Invoke-Elevated.ps1 -ScriptPath .\VM-NightlyUpdate\Create-VM.ps1 -Parameters @{
     TemplateName = 'Windows Server 2025 Template'
     Name         = 'Windows Server 2025 Test'
     Destination  = 'A:\VMs\Windows Server 2025 Test'
@@ -163,7 +168,7 @@ Test-Path .\VM-DVMS\License.lic
 ### DVMS v9
 
 ```powershell
-.\.claude\skills\vm-use\scripts\Invoke-Elevated.ps1 -ScriptPath .\VM-DVMS\New-VM-DVMS.ps1 -Parameters @{
+.\.agents\skills\vm-use\scripts\Invoke-Elevated.ps1 -ScriptPath .\VM-DVMS\New-VM-DVMS.ps1 -Parameters @{
     TemplateName = 'Windows 11 Template'
     Name         = 'Windows 11 Test DVMS v9.10'
     Destination  = 'A:\VMs\Windows 11 Test DVMS v9.10'
@@ -191,7 +196,7 @@ Same parameters, with `VM-DVMS-v10\New-VM-DVMS-v10.ps1` and a version that has
 `scripts\install.cmd`:
 
 ```powershell
-.\.claude\skills\vm-use\scripts\Invoke-Elevated.ps1 -ScriptPath .\VM-DVMS-v10\New-VM-DVMS-v10.ps1 -Parameters @{
+.\.agents\skills\vm-use\scripts\Invoke-Elevated.ps1 -ScriptPath .\VM-DVMS-v10\New-VM-DVMS-v10.ps1 -Parameters @{
     TemplateName = 'Windows 11 Template'
     Name         = 'Windows 11 Test DVMS main'
     Destination  = 'A:\VMs\Windows 11 Test DVMS main'
@@ -234,7 +239,7 @@ absolute path, and run it through the wrapper:
 
 ```powershell
 $ErrorActionPreference = 'Stop'
-. 'A:\src\hyper-v\.claude\skills\vm-use\scripts\VM-Use.ps1'
+. 'A:\src\hyper-v\.agents\skills\vm-use\scripts\VM-Use.ps1'
 $vm = Get-VMUseVM 'Windows 11 Test'                 # exactly one VM with this name
 if ($vm.State -eq 'Off') { Start-VM -VM $vm }
 $cred = Get-VMUseCredential -VM $vm                 # waits for Windows, then signs in
@@ -297,7 +302,7 @@ license copy and the install logs. It cannot be undone.
 1. Dry run, which changes nothing and prints the VM, its folder and size:
 
    ```powershell
-   .\.claude\skills\vm-use\scripts\Invoke-Elevated.ps1 -ScriptPath .\.claude\skills\vm-use\scripts\Remove-TestVM.ps1 -Parameters @{ Name='Windows 11 Test'; WhatIf=$true }
+   .\.agents\skills\vm-use\scripts\Invoke-Elevated.ps1 -ScriptPath .\.agents\skills\vm-use\scripts\Remove-TestVM.ps1 -Parameters @{ Name='Windows 11 Test'; WhatIf=$true }
    ```
 
 2. Show the user that output and ask whether to delete. A request to delete

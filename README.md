@@ -71,8 +71,9 @@ VM-NightlyUpdate nightly tasks ─► a template VM   (Windows 11 Template, Wind
 All launchers elevate themselves and use Windows PowerShell 5.1.
 
 AI agents create, use and delete these VMs with the `vm-use` skill in
-[`.claude/skills/vm-use`](.claude/skills/vm-use/SKILL.md), which runs the same
-scripts without their questions.
+[`.agents/skills/vm-use`](.agents/skills/vm-use/SKILL.md), which runs the same
+scripts without their questions. [`AGENTS.md`](AGENTS.md), which `CLAUDE.md`
+imports, lists the skills for every agent working in this repository.
 
 ## Requirements
 

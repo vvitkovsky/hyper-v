@@ -1,0 +1,4 @@
+interface:
+  display_name: "VM use"
+  short_description: "Create, use and delete Hyper-V test VMs, clean or with DVMS v9/v10"
+  default_prompt: "Use $vm-use to create a clean Windows 11 test VM."
