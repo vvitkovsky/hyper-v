@@ -1,4 +1,4 @@
-Nightly Hyper-V Windows updates - run from this folder
+Nightly Hyper-V Windows updates for template VMs, and copies of them - run from this folder
 
 QUICK SETUP
 1. Extract the package to the permanent local folder you want to use.
@@ -38,21 +38,24 @@ again for each VM and press Enter to keep its time and checkpoint; saved guest
 credentials are reused. Include Maintenance-Common.ps1 with the other scripts.
 Source-folder permissions remain unchanged for the requested testing setup.
 
-DEDICATED TEMPLATE AND CREATING MORE VMS
-The dedicated VM is named Windows 11 Template. Its permanent files live at:
+TEMPLATES AND CREATING MORE VMS
+A template is a VM installed with Install.cmd and kept only to be copied.
+There can be several, for example Windows 11 Template and Windows Server 2025
+Template. Each has its own permanent folder; Windows 11 Template lives at:
   A:\HyperV Template\
 Only Hyper-V's normal Virtual Machines, Virtual Hard Disks and Snapshots
-subfolders are needed. The VM stays registered and off between nightly runs.
-Automatic host-start and automatic checkpoints are disabled on this template.
+subfolders are needed. A template stays registered and off between nightly
+runs. Keep automatic host-start and automatic checkpoints disabled on it.
 
-Nightly maintenance updates the template, performs cleanup, shuts down and
-refreshes clean (or the configured checkpoint). It does not export anything.
-Working VMs are independent and are not updated by the template's task.
-Changes to the template affect copies created afterward, not existing copies.
+Nightly maintenance updates each template at its own time, performs cleanup,
+shuts down and refreshes clean (or the configured checkpoint). It does not
+export anything. Working VMs are independent and are not updated by a
+template's task. Changes to a template affect copies created afterward, not
+existing copies.
 
 To create a VM, run Create-VM.cmd. It prompts for the template, name,
 destination and Windows computer name:
-  Templates (VMs updated nightly from this folder):
+  Templates (VMs updated nightly by VM-NightlyUpdate):
     1. Windows 11 Template              checkpoint clean
     2. Windows Server 2025 Template     checkpoint clean
   Template to copy [1]:

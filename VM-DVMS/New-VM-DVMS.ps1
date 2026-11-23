@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 #Requires -PSEdition Desktop
-# Creates a VM from the maintained template, binds a DVMS license to its MAC
-# address and installs a DVMS build from the build share silently.
+# Creates a VM from a maintained template (-TemplateName), binds a DVMS license
+# to its MAC address and installs a DVMS build from the build share silently.
 [CmdletBinding()]
 param(
     [string]$Name,
@@ -10,8 +10,11 @@ param(
     [string]$Version,
     [string]$Installer,
     [string]$LicensePath,
-    [string]$TemplateName = 'Windows 11 Template',
-    [string]$CheckpointName = 'clean',
+    # Left empty, the template is chosen from those installed with
+    # VM-NightlyUpdate\Install.cmd, and the checkpoint is the one its nightly
+    # task refreshes.
+    [string]$TemplateName,
+    [string]$CheckpointName,
     [string]$BuildRoot = '\\rdfileserver\builds\DVMS',
     [string]$LegacyRepository = 'A:\src\legacy',
     [string]$InstallerArguments = '/i /q /norestart',
@@ -45,9 +48,10 @@ try {
     . (Join-Path $PSScriptRoot 'DVMS-Storage.ps1')
 
     # Ask everything first so the long copy and install run unattended.
-    $template=Get-TemplateVM $TemplateName
+    $selection=Resolve-TemplateSelection -TemplateName $TemplateName -CheckpointName $CheckpointName -BaseDirectory $nightlyUpdate
+    $template=$selection.VM; $TemplateName=$selection.Name; $CheckpointName=$selection.CheckpointName
     $credential=Get-TemplateGuestCredential -TemplateName $TemplateName -BaseDirectory $nightlyUpdate
-    $settings=Read-TemplateCopySettings -Name $Name -Destination $Destination -ComputerName $ComputerName
+    $settings=Read-TemplateCopySettings -Name $Name -Destination $Destination -ComputerName $ComputerName -DefaultName $selection.DefaultCopyName
 
     if ([string]::IsNullOrWhiteSpace($Version)) {
         Write-Host "Looking for DVMS builds in $BuildRoot..."
@@ -105,6 +109,7 @@ try {
     }
 
     Write-Host ''
+    Write-Host "Template:       $TemplateName (checkpoint '$CheckpointName')"
     Write-Host "New VM:         $($settings.Name)"
     Write-Host "Destination:    $($settings.Destination)"
     Write-Host "Computer name:  $($settings.ComputerName)"

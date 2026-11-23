@@ -1,14 +1,15 @@
 # hyper-v
 
-PowerShell scripts for Hyper-V test VMs. One VM, `Windows 11 Template`, is kept
-up to date every night. New test VMs are copied from it whenever they are
+PowerShell scripts for Hyper-V test VMs. Template VMs, such as
+`Windows 11 Template` and `Windows Server 2025 Template`, are kept up to date
+every night. New test VMs are copied from any of them whenever they are
 needed, for example for AI test runs, optionally with DVMS installed and
 licensed.
 
 | Folder | What it does | Start with |
 |---|---|---|
-| [`VM-NightlyUpdate`](VM-NightlyUpdate/README.txt) | Nightly maintenance of the template, and plain copies of it | `Install.cmd`, `Create-VM.cmd` |
-| [`VM-DVMS`](VM-DVMS/README.txt) | A copy of the template with a DVMS build installed and a license bound to the VM | `New-VM-DVMS.cmd` |
+| [`VM-NightlyUpdate`](VM-NightlyUpdate/README.txt) | Nightly maintenance of the templates, and plain copies of them | `Install.cmd`, `Create-VM.cmd` |
+| [`VM-DVMS`](VM-DVMS/README.txt) | A copy of a template with a DVMS build installed and a license bound to the VM | `New-VM-DVMS.cmd` |
 | [`VM-DVMS-v10`](VM-DVMS-v10/README.txt) | As `VM-DVMS`, for v10 (main) builds, plus the microservices from the build's `scripts\install.cmd` | `New-VM-DVMS-v10.cmd` |
 
 Each folder's `README.txt` has the full details, parameters and failure behaviour.
@@ -16,8 +17,8 @@ Each folder's `README.txt` has the full details, parameters and failure behaviou
 ## How it fits together
 
 ```text
-VM-NightlyUpdate nightly task ──► Windows 11 Template   (A:\HyperV Template, Off, checkpoint "clean")
-                                         │
+VM-NightlyUpdate nightly tasks ─► a template VM   (Windows 11 Template, Windows Server 2025 Template, ...:
+                                         │         each Off, with its own task and "clean" checkpoint)
               ┌──────────────────────────┴───────────────────────────┐
               ▼                                                      ▼
    VM-NightlyUpdate\Create-VM.cmd                         VM-DVMS\New-VM-DVMS.cmd
@@ -27,13 +28,18 @@ VM-NightlyUpdate nightly task ──► Windows 11 Template   (A:\HyperV Templat
    test VM: own disks and computer name, Off      test VM: licensed for its MAC, DVMS installed, Running
 ```
 
-- **The template** stays Off between runs. Every night a scheduled task
-  (`HyperVNightlyUpdate-<VM ID>`, running as SYSTEM) starts it, installs all
-  offered Windows updates, runs DISM component cleanup, shuts it down and
-  refreshes its `clean` checkpoint. Copies made earlier are not affected.
+- **A template** is any VM set up with `Install.cmd`; there can be several,
+  for example one for Windows 11 and one for Windows Server. Each stays Off
+  between runs and has its own scheduled task (`HyperVNightlyUpdate-<VM ID>`,
+  running as SYSTEM), time and checkpoint. Every night the task starts the
+  template, installs all offered Windows updates, runs DISM component
+  cleanup, shuts it down and refreshes its checkpoint (`clean` by default).
+  Copies made earlier are not affected.
 - **Copies** are independent full copies with a new VM ID, all disks inside
   their own folder (default `A:\VMs\<name>`) and their own Windows computer
   name. Their `clean` checkpoint is the renamed Windows state.
+  Every creation script asks which template to copy (Enter picks
+  `Windows 11 Template`); `-TemplateName` skips the question.
 - **DVMS copies** also get a static MAC address and a DVMS license re-signed
   for that address, which is written to `C:\Program Files\DVMS\Licenses`
   before the selected build is installed silently, and a second, dynamically
@@ -46,29 +52,36 @@ VM-NightlyUpdate nightly task ──► Windows 11 Template   (A:\HyperV Templat
 
 ## Quick start
 
-1. **Once:** set up nightly maintenance for the template. Run
+1. **Once per template:** set up nightly maintenance. Run
    `VM-NightlyUpdate\Install.cmd`, approve elevation, choose the template from
    the VM list (Enter picks Windows 11 Template), the time and the checkpoint,
-   and enter an administrator account from inside the template VM. Run it again
-   to update another VM, such as a Windows Server template. The credential is saved encrypted under
-   `VM-NightlyUpdate\.state` and reused by every other script.
+   and enter an administrator account from inside the template VM. Run it
+   again for each further template, such as a Windows Server one. Each
+   template's credential is saved encrypted under `VM-NightlyUpdate\.state`
+   and reused by every other script.
 2. **A plain test VM:** run `VM-NightlyUpdate\Create-VM.cmd` and answer the
    prompts (template, name, destination, computer name). Enter accepts each default.
 3. **A DVMS test VM:** put a license at `VM-DVMS\License.lic` (or give another
    path when asked), run `VM-DVMS\New-VM-DVMS.cmd` and choose the version
-   (default `main`) and installer.
+   (default `main`) and installer, after the same template and name questions.
 4. **A DVMS v10 test VM with microservices:** run
    `VM-DVMS-v10\New-VM-DVMS-v10.cmd`. It asks the same questions and uses
    `VM-DVMS\License.lic` unless `VM-DVMS-v10\License.lic` exists.
 
 All launchers elevate themselves and use Windows PowerShell 5.1.
 
+AI agents create, use and delete these VMs with the `vm-use` skill in
+[`.claude/skills/vm-use`](.claude/skills/vm-use/SKILL.md), which runs the same
+scripts without their questions.
+
 ## Requirements
 
 - Windows with Hyper-V, and an administrator account on the host.
-- The template VM `Windows 11 Template`, Off, with exactly one `clean`
-  checkpoint and the Guest Service Interface integration service enabled.
-- Free space on the VM drive for a full copy of the template (about 40 GB), plus
+- At least one template VM, for example `Windows 11 Template`: Off, with
+  exactly one checkpoint of the name chosen in `Install.cmd` (`clean` by
+  default) and the Guest Service Interface integration service enabled.
+- Free space on the VM drive for a full copy of the template (about 65 GB for
+  `Windows 11 Template` and 33 GB for `Windows Server 2025 Template`), plus
   the installer and about 10 GB for DVMS copies, and for DVMS v10 copies about
   15 GB plus twice the microservice installers (about 2.6 GB for main).
 - For `VM-DVMS` and `VM-DVMS-v10`: access to `\\rdfileserver\builds`, `git` on `PATH`, and the

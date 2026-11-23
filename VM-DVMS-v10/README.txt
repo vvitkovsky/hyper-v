@@ -1,4 +1,4 @@
-DVMS v10 test VM (main branch) from the maintained template
+DVMS v10 test VM (main branch) from a maintained template
 
 Run New-VM-DVMS-v10.cmd and approve administrator elevation. It does everything
 ..\VM-DVMS\New-VM-DVMS.cmd does, but before the DVMS installer runs it installs
@@ -10,6 +10,7 @@ and after it installs the recorder proxy service from:
   \\rdfileserver\builds\DVMS\VmsRecorderProxyService\<branch>\
 
 All questions come first, so the slow steps then run unattended:
+  Template to copy [1]:           (as in ..\VM-DVMS\README.txt)
   New VM name [Windows 11 Test]:
   Destination [A:\VMs\<chosen name>]:
   Windows computer name [WIN11-Test]:

@@ -1,11 +1,16 @@
-DVMS test VM from the maintained template
+DVMS test VM from a maintained template
 
 Run New-VM-DVMS.cmd and approve administrator elevation. It creates a new VM from
-the Windows 11 Template kept up to date by ..\VM-NightlyUpdate, binds a DVMS
-license to the new VM's MAC address and installs a DVMS build silently.
+a template kept up to date by ..\VM-NightlyUpdate, binds a DVMS license to the
+new VM's MAC address and installs a DVMS build silently.
 
 All questions come first, so the slow steps then run unattended:
-  New VM name [Windows 11 Test]:
+  Template to copy [1]:           (numbered list of the templates installed with
+                                   ..\VM-NightlyUpdate\Install.cmd; type a number
+                                   or a name. Enter picks Windows 11 Template, or
+                                   the only template)
+  New VM name [Windows 11 Test]:  (the template name with "Template" replaced by
+                                   "Test"; the next two defaults follow it)
   Destination [A:\VMs\<chosen name>]:
   Windows computer name [WIN11-Test]:
   DVMS version [<number of main>]: (numbered list of version folders on the share;
@@ -57,13 +62,17 @@ PARAMETERS (all optional; supplying one skips its question)
   -LicensePath, -TemplateName, -CheckpointName, -BuildRoot, -LegacyRepository,
   -InstallerArguments, -InstallTimeoutMinutes (default 120),
   -StorageSizeGB (default 200), -NoPause
+Without -CheckpointName the checkpoint copied is the one the template's nightly
+task refreshes, as in ..\VM-NightlyUpdate\Create-VM.cmd.
 Example:
   .\New-VM-DVMS.ps1 -Name 'DVMS main' -ComputerName 'DVMS-MAIN' -Version main -LicensePath D:\License.lic
 
 REQUIREMENTS
 - Windows PowerShell 5.1 (the .cmd uses it): the license format needs
   BinaryFormatter and SignedXml from .NET Framework.
-- The template must be off, with exactly one clean checkpoint.
+- The template must be off, with exactly one checkpoint of the name its
+  nightly task refreshes (clean by default), and installed with
+  ..\VM-NightlyUpdate\Install.cmd so that its guest credential is saved.
 - git on PATH and the legacy repository checked out.
 - Free space on the VM drive for a full template copy plus the installer and
   10 GB, and on the cache drive for the installer. The storage disk starts

@@ -99,6 +99,35 @@ function Get-TemplateVM([string]$TemplateName) {
     $found[0]
 }
 
+function Resolve-TemplateSelection {
+    # Needs VM-Registration.ps1 loaded. Without a name, asks which of the
+    # templates installed with Install.cmd to copy. Without a checkpoint name,
+    # uses the one the template's nightly task refreshes.
+    param([string]$TemplateName,[string]$CheckpointName,[Parameter(Mandatory=$true)][string]$BaseDirectory)
+    $installations=@(Get-VMUpdateInstallations -BaseDirectory $BaseDirectory | Sort-Object VMName)
+    if ([string]::IsNullOrWhiteSpace($TemplateName)) {
+        if (-not $installations.Count) { throw 'No template has nightly updates installed. Run VM-NightlyUpdate\Install.cmd for the template first, or supply -TemplateName.' }
+        $default=if (@($installations | Where-Object VMName -EQ 'Windows 11 Template').Count) { 'Windows 11 Template' } elseif ($installations.Count -eq 1) { $installations[0].VMName } else { $null }
+        Write-Host 'Templates (VMs updated nightly by VM-NightlyUpdate):'
+        $TemplateName=Read-VMUpdateChoice -Prompt 'Template to copy' -Default $default -Items @($installations | ForEach-Object {
+            $state=(Get-VM -Id $_.VMId -ErrorAction SilentlyContinue).State
+            $detail="checkpoint $($_.Checkpoint)"
+            if (-not $state) { $detail+=', VM not found' } elseif ($state -ne 'Off') { $detail+=", $state - shut it down before copying" }
+            [pscustomobject]@{ Name=$_.VMName; Detail=$detail }
+        })
+    }
+    $template=Get-TemplateVM $TemplateName
+    if ([string]::IsNullOrWhiteSpace($CheckpointName)) {
+        $installed=@($installations | Where-Object VMId -EQ $template.Id)
+        $CheckpointName=if ($installed.Count) { $installed[0].Checkpoint } else { 'clean' }
+    }
+    [pscustomobject]@{
+        Name=$TemplateName;VM=$template;CheckpointName=$CheckpointName
+        # 'Windows Server 2025 Template' suggests 'Windows Server 2025 Test'.
+        DefaultCopyName=($TemplateName -replace '\s*\bTemplate$','').Trim()+' Test'
+    }
+}
+
 function Get-TemplateGuestCredential {
     # Needs VM-Registration.ps1, Credential-Input.ps1 and System.Security loaded.
     param([Parameter(Mandatory=$true)][string]$TemplateName,[Parameter(Mandatory=$true)][string]$BaseDirectory)

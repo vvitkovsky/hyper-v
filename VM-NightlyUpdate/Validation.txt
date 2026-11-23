@@ -1,3 +1,15 @@
+Template question in the DVMS scripts - 2026-11-23.
+
+- New-VM-DVMS and New-VM-DVMS-v10 now ask which template to copy, through
+  Resolve-TemplateSelection in Template-Clone.ps1, which Create-VM also uses.
+  Without -CheckpointName they copy the checkpoint the template's nightly task
+  refreshes instead of always clean, and the suggested VM name follows the
+  template.
+- 10 mocked selection cases passed under Windows PowerShell 5.1: Enter, number
+  and typed name, number out of range, -TemplateName, -CheckpointName, a VM
+  without nightly updates, an unknown name, a single template as the default,
+  and no installed template. No VM was created with the changed scripts.
+
 Windows self-restart during a pass, shutdown after failure - 2026-10-29.
 
 - October 29 midnight run failed in Update pass 2. After the KB5127936 restart,
