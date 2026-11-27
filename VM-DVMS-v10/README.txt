@@ -54,9 +54,9 @@ WHAT IT DOES
    to "<destination>\Install logs" and restarts Windows when it returns 3010.
 6. Installs the recorder proxy service. The installer is the newest .exe or
    .msi in VmsRecorderProxyService\<version> when that folder exists, otherwise
-   in the folder with the newest installer (today main-recorder-proxy, so
-   VmsRecorderProxyServiceSetup.exe); -RecorderProxyInstaller picks another
-   file. It is cached on the host with the microservice installers and run
+   in the folder with the newest installer (VmsRecorderProxyServiceSetup.exe;
+   builds before legacy PR 5412 published to main-recorder-proxy instead of
+   main); -RecorderProxyInstaller picks another file. It is cached on the host with the microservice installers and run
    silently from the install media disk, logging to C:\DVMSSetup\RecorderProxy:
      <installer>.exe /install /quiet /norestart /log RecorderProxy-install.log
    (an .msi runs with msiexec /i /qn /norestart /l*v). Its logs go to
